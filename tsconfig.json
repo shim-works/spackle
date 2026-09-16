@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "es2016",
+    // lib bumped independently of target: the ported islands reference the
+    // ES2021-2024 method families they polyfill (String.replaceAll,
+    // Array.prototype.at/findLast/toSorted/with, Object.hasOwn/groupBy,
+    // Map.groupBy, String.isWellFormed/toWellFormed, ...) plus
+    // Promise.any/try/withResolvers, all newer than es2016's ambient types.
+    // That's a type-checking concern only -- actual emitted JS still targets
+    // es2016 syntax (tsup/esbuild handles the real downlevel transform, and
+    // this repo's ported code is already hand-written ES5-safe anyway).
+    // RegExp.escape (ES2025) isn't in any released TS lib yet -- see the
+    // ambient declaration in src/types.d.ts.
+    "lib": [
+      "ES2024",
+      "ESNext.Promise",
+      "DOM"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    // off: ported modules assume Repo B's array-indexing conventions
+    // (the prior implementation itself runs with "strict": false), and this flag
+    // fights that pattern throughout without catching real bugs.
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}
