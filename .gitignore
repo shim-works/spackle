@@ -1,0 +1,8 @@
+/node_modules
+/dist
+.env
+.DS_Store
+/src/debug/spackle-test.js
+/src/debug/spackle-test.html
+/.claude
+/docs

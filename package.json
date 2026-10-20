@@ -1,0 +1,76 @@
+{
+  "name": "@shim-works/spackle",
+  "version": "0.1.0-beta.1",
+  "description": "Runtime polyfills for long-lived apps on old engines (smart TV, set-top box, kiosk) \u2014 Chrome >= 38 / Safari >= 7.1, built to avoid retaining memory rather than to match core-js",
+  "keywords": [
+    "polyfill",
+    "polyfills",
+    "smart-tv",
+    "tv",
+    "set-top-box",
+    "kiosk",
+    "embedded",
+    "legacy-browser",
+    "chrome-38",
+    "safari-7",
+    "es5",
+    "core-js-alternative",
+    "memory",
+    "garbage-collection",
+    "retention"
+  ],
+  "license": "MIT",
+  "author": "Sam Seabourn",
+  "homepage": "https://github.com/shim-works/spackle#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shim-works/spackle.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shim-works/spackle/issues"
+  },
+  "sideEffects": true,
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "DESIGN.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && node scripts/downlevel-es5.mjs dist/index.global.js && npm run verify:es5",
+    "build:bundle": "tsup --config tsup.bundle.config.ts && node scripts/downlevel-es5.mjs spackle.js && node scripts/verify-es5.mjs spackle.js",
+    "lint": "tsc && node scripts/check-source.mjs",
+    "lint:tests": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test262": "node --max-old-space-size=3000 scripts/test262.mjs",
+    "build:browser-tests": "node scripts/build-browser-tests.mjs",
+    "verify:es5": "node scripts/verify-es5.mjs"
+  },
+  "dependencies": {
+    "promise-polyfill": "^8.3.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/preset-env": "^7.26.0",
+    "@swc/core": "^1.16.2",
+    "@types/node": "^22.10.2",
+    "@vitest/browser": "^3.0.0",
+    "playwright": "^1.62.1",
+    "regenerator-runtime": "^0.14.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

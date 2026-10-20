@@ -1,0 +1,76 @@
+// Number constructor — behavioral: ES2015 taught Number('0b101') / Number('0o17')
+// to parse binary and octal string literals; older engines return NaN.
+export const isSupported = (): boolean => {
+  try {
+    return Number('0b101') === 5 && Number('0o17') === 15;
+  } catch {
+    return false;
+  }
+};
+
+export const isNumberConstructorSupported = isSupported;
+
+/**
+ * Spec: https://tc39.es/ecma262/#sec-number-constructor
+ *
+ * Known limitations:
+ * - [incomplete] only the ES2015 StringNumericLiteral additions are fixed
+ *   (binary '0b' / octal '0o' string parsing); everything else defers to the
+ *   native constructor, and prototype.constructor is left pointing at it.
+ */
+
+const NativeNumber = Number;
+
+export const NumberPolyfill = function (this: any, value?: any): any {
+  let input: any = arguments.length === 0 ? 0 : value;
+  if (arguments.length !== 0 && typeof value === 'string') {
+    // inlined: parseNumericString(value) -- 0b/0o literals; anything else is native
+    const trimmed = value.replace(/^\s+|\s+$/g, '');
+    if (trimmed.length > 2 && trimmed.charAt(0) === '0') {
+      const marker = trimmed.charAt(1);
+      const digits = trimmed.substring(2);
+      if (marker === 'b' || marker === 'B') {
+        input = /^[01]+$/.test(digits) ? parseInt(digits, 2) : NaN;
+      } else if (marker === 'o' || marker === 'O') {
+        input = /^[0-7]+$/.test(digits) ? parseInt(digits, 8) : NaN;
+      }
+    }
+  }
+  // `new Number(x)` boxes — hand back a genuine native wrapper object so
+  // typeof/valueOf/instanceof all stay honest
+  if (this instanceof NumberPolyfill) {
+    return new NativeNumber(NativeNumber(input));
+  }
+  return NativeNumber(input);
+};
+
+// instances are native boxed Numbers, so instanceof keeps working
+NumberPolyfill.prototype = NativeNumber.prototype;
+
+// carry the statics across (constants and ES2015+ methods)
+const staticKeys = [
+  'MAX_VALUE',
+  'MIN_VALUE',
+  'NaN',
+  'NEGATIVE_INFINITY',
+  'POSITIVE_INFINITY',
+  'EPSILON',
+  'MAX_SAFE_INTEGER',
+  'MIN_SAFE_INTEGER',
+  'isFinite',
+  'isInteger',
+  'isNaN',
+  'isSafeInteger',
+  'parseFloat',
+  'parseInt',
+];
+for (let i = 0; i < staticKeys.length; i++) {
+  const key = staticKeys[i];
+  // Copy the native's own descriptor, not its value: plain assignment made
+  // every static enumerable and writable (Number.MAX_VALUE = 0 "worked").
+  const descriptor = Object.getOwnPropertyDescriptor(NativeNumber, key);
+  if (descriptor) {
+    Object.defineProperty(NumberPolyfill, key, descriptor);
+  }
+}
+

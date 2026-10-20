@@ -1,0 +1,135 @@
+<p align="center">
+  <img src="docs/assets/spencer.svg" width="120" alt="Spencer, the spackle mascot">
+</p>
+
+<h1 align="center">spackle</h1>
+
+<p align="center">Polyfills for weak hardware.</p>
+
+spackle fills in modern JavaScript (Map, Set, Promise, Symbol, URL, iterator
+helpers, `Array.from`, `padStart` and around 170 more) on old browser engines,
+down to **Chrome 38 and Safari 7.1**. It's built for smart TVs, set-top boxes
+and other low-powered devices.
+
+Every polyfill is a self-contained "island": no shared helpers and no garbage
+created per call. Because it makes less garbage, the garbage collector runs
+less often, and on a weak device that means less jank. spackle only installs
+what the engine is missing, so on a modern browser it does almost nothing.
+
+| Engine | vs core-js (same workload) |
+|---|---|
+| Chrome 38 | ~8× faster |
+| Safari 7.1 | ~4× faster |
+| Chrome 41 | ~7× less garbage, ~6× fewer GCs, half the heap |
+| Chrome 80 | same speed |
+
+Measurements and method: [docs/metrics.md](docs/metrics.md).
+
+## Install
+
+```sh
+npm install @shim-works/spackle@alpha
+```
+
+Import it once, **first**, before anything else in your app's entry file:
+
+```js
+import '@shim-works/spackle';
+import App from './App';
+```
+
+It installs everything it needs as a side effect. There's no config and no
+init call.
+
+### Or as a script tag
+
+No bundler? Copy `dist/index.global.js` from the package (or `spackle.js` from
+this repo) next to your app, and load it before anything else:
+
+```html
+<script src="spackle.js"></script>
+<script src="app.js"></script>
+```
+
+## Remove core-js
+
+spackle replaces core-js. Running both means paying for two sets of
+polyfills, and core-js will overwrite spackle's. Remove core-js and turn off
+anything that injects it.
+
+**Dependencies**
+
+```sh
+npm uninstall core-js core-js-pure @babel/runtime-corejs3
+```
+
+Delete any `import 'core-js/...'` or `import 'core-js/stable'` lines.
+
+**Babel** (`babel.config.js` / `.babelrc`)
+
+```js
+module.exports = {
+  presets: [
+    ['@babel/preset-env', {
+      targets: { chrome: '38', safari: '7.1' },
+      // was: useBuiltIns: 'usage' or 'entry', corejs: 3
+      useBuiltIns: false,
+    }],
+  ],
+  plugins: [
+    // if you use transform-runtime, keep it for helpers only
+    ['@babel/plugin-transform-runtime', { corejs: false }],
+  ],
+};
+```
+
+Babel still handles **syntax** (arrow functions, classes, async/await).
+spackle handles the **built-ins**. If you use async functions or generators,
+keep `regenerator-runtime`; it's a syntax helper, not a polyfill.
+
+**SWC** (`.swcrc`)
+
+```json
+{
+  "env": {
+    "targets": "chrome 38, safari 7.1"
+  }
+}
+```
+
+Remove `"mode": "usage"` / `"mode": "entry"` and `"coreJs"` from `env`.
+
+**Vite** (`@vitejs/plugin-legacy`)
+
+```js
+legacy({
+  targets: ['chrome >= 38', 'safari >= 7.1'],
+  polyfills: false,
+  modernPolyfills: false,
+})
+```
+
+Then import spackle first in your entry file, as above.
+
+**TypeScript (tsc only)**
+
+Nothing to change. tsc never injects polyfills.
+
+### Check it worked
+
+Search your production bundle for `core-js`. It shouldn't appear.
+
+## Good to know
+
+- **Browser only.** spackle expects `window`. It isn't meant for Node or web
+  workers.
+- **Ship ES5 to old engines.** spackle covers built-ins, not syntax. Your own
+  code still needs transpiling down to your target.
+- **Known limits** are listed in each module's source under "Known limitations"
+  (for example: polyfilled symbols report `typeof` as `'object'`, since ES5
+  can't add a primitive type).
+- **Alpha.** The API is one import, but expect rough edges. Issues are welcome.
+
+## License
+
+MIT

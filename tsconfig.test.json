@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Ported test files are the prior implementation's own — that repo runs with
+    // "strict": false, so its tests were never written against strict-mode
+    // scrutiny. Relaxing here rather than editing 40+ ported test files.
+    "strict": false,
+    "types": [
+      "vitest/globals",
+      "node"
+    ]
+  },
+  "include": [
+    "src",
+    "tests"
+  ]
+}
