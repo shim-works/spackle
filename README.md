@@ -1,22 +1,18 @@
 <p align="center">
-  <img src="docs/assets/spencer.svg" width="120" alt="Spencer, the spackle mascot">
+  <img src="https://cdn.jsdelivr.net/gh/shim-works/spackle@main/assets/spencer.svg" width="120" alt="Spencer, the spackle mascot">
 </p>
 
 <h1 align="center">spackle</h1>
 
 <p align="center">Polyfills for weak hardware.</p>
 
-spackle fills in modern JavaScript (Map, Set, Promise, Symbol, URL, iterator
-helpers, `Array.from`, `padStart` and around 170 more) on old browser engines,
-down to **Chrome 38 and Safari 7.1**. It's built for smart TVs, set-top boxes
+Spackle is a Polyfill library built for weak hardware smart TVs, set-top boxes
 and other low-powered devices.
 
-Every polyfill is a self-contained "island": no shared helpers and no garbage
-created per call. Because it makes less garbage, the garbage collector runs
-less often, and on a weak device that means less jank. spackle only installs
-what the engine is missing, so on a modern browser it does almost nothing.
+Every polyfill is a self-contained "island" to stop deeply nested polyfill dependencies which greatly reduces the amount of garbage created.
+With Spackle Garbage collector runs less often, which means pause the world work for the device. 
 
-| Engine | vs core-js (same workload) |
+| Engine | vs core-js (128mb max heap size single thread) |
 |---|---|
 | Chrome 38 | ~8× faster |
 | Safari 7.1 | ~4× faster |
@@ -28,7 +24,7 @@ Measurements and method: [docs/metrics.md](docs/metrics.md).
 ## Install
 
 ```sh
-npm install @shim-works/spackle@alpha
+npm install @shim-works/spackle
 ```
 
 Import it once, **first**, before anything else in your app's entry file:
