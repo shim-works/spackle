@@ -1,7 +1,7 @@
 {
   "name": "@shim-works/spackle",
-  "version": "0.1.0-alpha.0",
-  "description": "Runtime polyfills for slow hardware (smart TV, set-top box, kiosks, etc) \u2014 Chrome >= 38 / Safari >= 7.1, built to avoid retaining memory rather than to match core-js",
+  "version": "0.1.0-alpha.1",
+  "description": "Runtime polyfills for slow hardware (smart TV, set-top box, kiosks, etc) — Chrome >= 38 / Safari >= 7.1, built to avoid retaining memory rather than to match core-js",
   "keywords": [
     "polyfill",
     "polyfills",
