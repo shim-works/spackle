@@ -6,13 +6,13 @@
 
 <p align="center">Polyfills for weak hardware.</p>
 
-Spackle is a Polyfill library built for weak hardware smart TVs, set-top boxes
+Spackle is a polyfill library built for weak hardware: smart TVs, set-top boxes
 and other low-powered devices.
 
-Every polyfill is a self-contained "island" to stop deeply nested polyfill dependencies which greatly reduces the amount of garbage created.
-With Spackle Garbage collector runs less often, which means pause the world work for the device. 
+Every polyfill is a self-contained "island" to stop deeply nested polyfill dependencies, which greatly reduces the amount of garbage created.
+With Spackle, the garbage collector runs less often, which means less stop-the-world work for the device.
 
-| Engine | vs core-js (128mb max heap size single thread) |
+| Engine | vs core-js (128 MB max heap size, single thread) |
 |---|---|
 | Chrome 38 | ~8× faster |
 | Safari 7.1 | ~4× faster |
@@ -68,7 +68,7 @@ module.exports = {
   presets: [
     ['@babel/preset-env', {
       targets: { chrome: '38', safari: '7.1' },
-      // was: useBuiltIns: 'usage' or 'entry', corejs: 3
+      // useBuiltIns: 'usage' or 'entry', corejs: 3 <-- not this
       useBuiltIns: false,
     }],
   ],
@@ -105,22 +105,13 @@ legacy({
 })
 ```
 
-Then import spackle first in your entry file, as above.
 
-**TypeScript (tsc only)**
-
-Nothing to change. tsc never injects polyfills.
-
-### Check it worked
-
-Search your production bundle for `core-js`. It shouldn't appear.
-
-## Good to know
+## Important Notes
 
 - **Browser only.** spackle expects `window`. It isn't meant for Node or web
   workers.
 - **Ship ES5 to old engines.** spackle covers built-ins, not syntax. Your own
-  code still needs transpiling down to your target.
+  code still needs transpiling down to your target with tools like babel.
 - **Known limits** are listed in each module's source under "Known limitations"
   (for example: polyfilled symbols report `typeof` as `'object'`, since ES5
   can't add a primitive type).
