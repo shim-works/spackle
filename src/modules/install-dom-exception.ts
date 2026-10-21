@@ -151,7 +151,7 @@ DOMExceptionPolyfill.prototype = Object.create(Error.prototype);
 Object.defineProperty(DOMExceptionPolyfill.prototype, 'constructor', { value: DOMExceptionPolyfill, writable: true, enumerable: false, configurable: true });
 defineShape(DOMExceptionPolyfill.prototype, []);
 
-export const install = (): void => {
+export const installDomException = (): void => {
   // Already installed (the prototype is frozen below): nothing left to choose.
   const own = Object.getOwnPropertyDescriptor(DOMExceptionPolyfill, 'prototype');
   if (own && own.writable) {
@@ -180,13 +180,6 @@ export const install = (): void => {
           } catch (e2) { /* locked native prototype */ }
         }
         DOMExceptionPolyfill.prototype = ownProto;
-      }
-      for (const key in native) {
-        if (/^[A-Z_]+$/.test(key) && typeof native[key] === 'number') {
-          try {
-            Object.defineProperty(DOMExceptionPolyfill, key, { value: native[key], writable: false, enumerable: true, configurable: false });
-          } catch (e) { /* already there */ }
-        }
       }
     }
     defineStatics(DOMExceptionPolyfill.prototype);

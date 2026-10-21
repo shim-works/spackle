@@ -139,7 +139,7 @@ export const dataViewSetFloat16 = function setFloat16(this: any, byteOffset: any
   this.setUint16(index + 0, bits, !!(arguments.length > 2 && arguments[2]));
 };
 
-export const install = (): void => {
+export const installFloat16 = (): void => {
   if (scratch) {
     if (typeof (Math as any).f16round !== 'function') {
       define((Math as any), 'f16round', mathF16round);

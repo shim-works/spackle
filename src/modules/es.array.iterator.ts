@@ -18,7 +18,7 @@ const returnSelf = function (this: any) {
   return this;
 };
 
-// One shared prototype, so _iterator-impl's splice has something to hang the
+// One shared prototype, so install-iterator's splice has something to hang the
 // helpers off (never Object.prototype), and no closures per iterator.
 // It inherits %IteratorPrototype% when a built-in iterator can lead us to it
 // (the iterator island also splices it at install, for engines where none can).

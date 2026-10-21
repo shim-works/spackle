@@ -1185,7 +1185,7 @@ const installIteratorPolyfill = (): void => {
  * Installed last of the iterator family: it samples live iterators to find
  * their prototypes, so every iterator source must be installed first.
  */
-export const install = (): void => {
+export const installIterator = (): void => {
   installIteratorPolyfill();
   installIteratorExtensionsOnNative();
 };

@@ -16,7 +16,7 @@ import { isSupported as isMapSupported, install as installMap } from './modules/
 import { isSupported as isSetSupported, install as installSet } from './modules/es.set.js';
 import { install as installWeakMap } from './modules/es.weak-map.js';
 import { isSupported as isPromiseSupported, install as installPromise } from './modules/es.promise.js';
-import { install as installDisposable } from './modules/_disposable-impl.js';
+import { installDisposable } from './modules/install-disposable.js';
 import { isSupported as isUrlSearchParamsSupported, install as installUrlSearchParams } from './modules/web.url-search-params.js';
 import { isSupported as isUrlSupported, install as installUrl } from './modules/web.url.js';
 
@@ -122,10 +122,10 @@ import { isSupported as isStringTrimEndSupported, stringTrimEnd } from './module
 import { isSupported as isStringTrimStartSupported, stringTrimStart } from './modules/es.string.trim-start.js';
 import { isSupported as isArrayBufferDetachedSupported, install as installArrayBufferDetached } from './modules/es.array-buffer.detached.js';
 import { isSupported as isArrayBufferTransferSupported, install as installArrayBufferTransfer } from './modules/es.array-buffer.transfer.js';
-import { isSupported as isArrayBufferImplSupported, install as installArrayBufferImpl } from './modules/_array-buffer-impl.js';
-import { isSupported as isFloat16ImplSupported, install as installFloat16Impl } from './modules/_float16-impl.js';
-import { install as installTypedArrayImpl } from './modules/_typed-array-impl.js';
-import { isSupported as isUint8ArrayImplSupported, install as installUint8ArrayImpl } from './modules/_uint8-array-impl.js';
+import { isSupported as isArrayBufferImplSupported, installArrayBuffer } from './modules/install-array-buffer.js';
+import { isSupported as isFloat16ImplSupported, installFloat16 } from './modules/install-float16.js';
+import { installTypedArray } from './modules/install-typed-array.js';
+import { isSupported as isUint8ArrayImplSupported, installUint8Array } from './modules/install-uint8-array.js';
 import { isSupported as isDateToIsoStringSupported, dateToISOString } from './modules/es.date.to-iso-string.js';
 import { isSupported as isDateToJsonSupported, dateToJSON } from './modules/es.date.to-json.js';
 import { isSupported as isDateToPrimitiveSupported, install as installDateToPrimitive } from './modules/es.date.to-primitive.js';
@@ -164,14 +164,14 @@ import { isSupported as isNumberToFixedSupported, numberToFixed } from './module
 import { isSupported as isNumberToPrecisionSupported, numberToPrecision } from './modules/es.number.to-precision.js';
 import { isSupported as isParseFloatSupported, numberParseFloat as globalParseFloat } from './modules/es.parse-float.js';
 import { isSupported as isParseIntSupported, numberParseInt as globalParseInt } from './modules/es.parse-int.js';
-import { install as installIteratorImpl } from './modules/_iterator-impl.js';
+import { installIterator } from './modules/install-iterator.js';
 import { isSupported as isPromiseAllSettledSupported, promiseAllSettled } from './modules/es.promise.all-settled.js';
 import { isSupported as isPromiseAnySupported, promiseAny } from './modules/es.promise.any.js';
 import { isSupported as isPromiseFinallySupported, promiseFinally } from './modules/es.promise.finally.js';
 import { isSupported as isPromiseTrySupported, promiseTry } from './modules/es.promise.try.js';
 import { isSupported as isPromiseWithResolversSupported, promiseWithResolvers } from './modules/es.promise.with-resolvers.js';
-import { isSupported as isDomExceptionImplSupported, install as installDomExceptionImpl } from './modules/_dom-exception-impl.js';
-import { isSupported as isSetImmediateImplSupported, clearImmediate, setImmediate } from './modules/_set-immediate-impl.js';
+import { isSupported as isDomExceptionImplSupported, installDomException } from './modules/install-dom-exception.js';
+import { isSupported as isSetImmediateImplSupported, installSetImmediate } from './modules/install-set-immediate.js';
 import { isSupported as isAtobSupported, atobPolyfill } from './modules/web.atob.js';
 import { isSupported as isQueueMicrotaskSupported, queueMicrotask } from './modules/web.queue-microtask.js';
 import { isSupported as isSelfSupported, install as installSelf } from './modules/web.self.js';
@@ -182,8 +182,8 @@ import { isSupported as isUrlSearchParamsSizeSupported, install as installUrlSea
 import { isSupported as isUrlCanParseSupported, urlCanParse } from './modules/web.url.can-parse.js';
 import { isSupported as isUrlParseSupported, urlParse } from './modules/web.url.parse.js';
 import { isSupported as isUrlToJsonSupported, urlToJSON } from './modules/web.url.to-json.js';
-import { isSupported as isReflectImplSupported, Reflect } from './modules/_reflect-impl.js';
-import { install as installSetMethods } from './modules/_set-methods-impl.js';
+import { isSupported as isReflectImplSupported, installReflect } from './modules/install-reflect.js';
+import { installSetMethods } from './modules/install-set-methods.js';
 import { isSupported as isStringIteratorSupported, install as installStringIterator } from './modules/es.string.iterator.js';
 import { install as installDomCollectionsForEach } from './modules/web.dom-collections.for-each.js';
 import { install as installDomCollectionsIterator } from './modules/web.dom-collections.iterator.js';
@@ -191,7 +191,7 @@ import { install as installDomCollectionsIterator } from './modules/web.dom-coll
 export const installPolyfills = (): void => {
   // Symbol is already in (see the import at the top). These go first because
   // other islands use the constructors at install time: es.weak-set nests on
-  // WeakMap, _set-methods-impl reads Set, es.promise.any constructs an
+  // WeakMap, install-set-methods reads Set, es.promise.any constructs an
   // AggregateError, web.url parses with URLSearchParams.
   if (!isObjectToStringSupported()) installObjectToString();
   if (!isAggregateErrorSupported()) installAggregateError();
@@ -251,10 +251,7 @@ export const installPolyfills = (): void => {
   // Reflect itself BEFORE its @@toStringTag: the tagger can only tag a Reflect
   // that exists, and on an engine without a native one that is this line's job.
   // Not define(): that names the value, and the Reflect namespace has no `name`.
-  if (!isReflectImplSupported()) {
-    Object.defineProperty(window, 'Reflect', { value: Reflect, writable: true, enumerable: false, configurable: true });
-    Object.defineProperty(Reflect, '__polyfilled', { value: true });
-  }
+  if (!isReflectImplSupported()) installReflect();
   if (!isReflectToStringTagSupported()) installReflectToStringTag();
 
   // Array.
@@ -331,10 +328,10 @@ export const installPolyfills = (): void => {
   // Binary: ArrayBuffer, DataView, typed arrays.
   if (!isArrayBufferDetachedSupported()) installArrayBufferDetached();
   if (!isArrayBufferTransferSupported()) installArrayBufferTransfer();
-  if (!isArrayBufferImplSupported()) installArrayBufferImpl();
-  if (!isFloat16ImplSupported()) installFloat16Impl();
-  installTypedArrayImpl();
-  if (!isUint8ArrayImplSupported()) installUint8ArrayImpl();
+  if (!isArrayBufferImplSupported()) installArrayBuffer();
+  if (!isFloat16ImplSupported()) installFloat16();
+  installTypedArray();
+  if (!isUint8ArrayImplSupported()) installUint8Array();
 
   // Number, Math, Date, JSON, parsing.
   if (!isDateToIsoStringSupported()) define(Date.prototype, 'toISOString', dateToISOString);
@@ -392,12 +389,9 @@ export const installPolyfills = (): void => {
 
   // Iterator helpers, last of the iterator family: they sample a live iterator
   // from every source to find the prototypes to splice.
-  installIteratorImpl();
-  if (!isDomExceptionImplSupported()) installDomExceptionImpl();
-  if (!isSetImmediateImplSupported()) {
-    define(window, 'setImmediate', setImmediate);
-    define(window, 'clearImmediate', clearImmediate);
-  }
+  installIterator();
+  if (!isDomExceptionImplSupported()) installDomException();
+  if (!isSetImmediateImplSupported()) installSetImmediate();
   if (typeof window !== 'undefined' && !isAtobSupported()) define(window, 'atob', atobPolyfill);
   if (!isSelfSupported()) installSelf();
   if (!isStructuredCloneSupported()) define(window, 'structuredClone', structuredClone);

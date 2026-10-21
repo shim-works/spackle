@@ -495,7 +495,7 @@ if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
 }
 // Iterable itself, so [...params.entries()] and Array.from(params.keys()) work.
 // Chrome 38/41 have no %IteratorPrototype% to inherit this from (until
-// _iterator-impl splices one in), so add it unless it is already inherited.
+// install-iterator splices one in), so add it unless it is already inherited.
 if (iteratorKey && typeof ParamsIteratorPrototype[iteratorKey] !== 'function') {
   Object.defineProperty(ParamsIteratorPrototype, iteratorKey, {
     value: function (this: any) {

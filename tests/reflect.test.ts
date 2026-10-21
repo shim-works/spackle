@@ -1,4 +1,4 @@
-import { Reflect as ReflectPolyfill, isSupported as reflectImplSupported } from '../src/modules/_reflect-impl.js';
+import { Reflect as ReflectPolyfill, isSupported as reflectImplSupported } from '../src/modules/install-reflect.js';
 import { installPolyfills } from '../src/install-polyfills.js';
 import { symbolIsShimmed } from './engine-capabilities.js';
 
@@ -94,7 +94,7 @@ describe('Reflect — partial polyfill', () => {
     expect(ReflectPolyfill.ownKeys({ a: 1, b: 2 }).sort()).toEqual(['a', 'b']);
   });
 
-  // Already documented at _reflect-impl.ts:21 — "[incomplete] ownKeys omits
+  // Already documented at install-reflect.ts:21 — "[incomplete] ownKeys omits
   // Symbol keys when the runtime has no Symbols." A shimmed symbol is a
   // '@@name' string key that hideSymbolKeys() deliberately filters out.
   it.skipIf(symbolIsShimmed())('ownKeys() includes Symbol keys when present', () => {

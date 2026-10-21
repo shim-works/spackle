@@ -33,7 +33,7 @@ const T262 = process.env.TEST262 || resolve(ROOT, '../test262');
  */
 const FEATURES = {
   'iterator-helpers': {
-    modules: ['_iterator-impl.ts'],
+    modules: ['install-iterator.ts'],
     dir: 'test/built-ins/Iterator/prototype',
     // only the ids spackle registers -- the same tree holds esnext helpers
     // (chunks/windows/sliding/zip) that are deliberately out of scope
@@ -45,7 +45,7 @@ const FEATURES = {
       delete globalThis.Iterator;`,
   },
   'uint8array-base64': {
-    modules: ['_uint8-array-impl.ts'],
+    modules: ['install-uint8-array.ts'],
     dir: 'test/built-ins/Uint8Array/prototype',
     only: ['toBase64', 'toHex', 'setFromBase64', 'setFromHex'],
     strip: `['toBase64','toHex','setFromBase64','setFromHex']
@@ -53,7 +53,7 @@ const FEATURES = {
       delete Uint8Array.fromBase64; delete Uint8Array.fromHex;`,
   },
   'uint8array-from': {
-    modules: ['_uint8-array-impl.ts'],
+    modules: ['install-uint8-array.ts'],
     dir: 'test/built-ins/Uint8Array',
     only: ['fromBase64', 'fromHex'],
     strip: `delete Uint8Array.fromBase64; delete Uint8Array.fromHex;`,
@@ -71,13 +71,13 @@ const FEATURES = {
     strip: `delete WeakMap.prototype.getOrInsert; delete WeakMap.prototype.getOrInsertComputed;`,
   },
   'disposable-stack': {
-    modules: ['_disposable-impl.ts'],
+    modules: ['install-disposable.ts'],
     dir: 'test/built-ins/DisposableStack',
     strip: `delete globalThis.DisposableStack; delete globalThis.AsyncDisposableStack;
       delete globalThis.SuppressedError;`,
   },
   'suppressed-error': {
-    modules: ['_disposable-impl.ts'],
+    modules: ['install-disposable.ts'],
     dir: 'test/built-ins/SuppressedError',
     strip: `delete globalThis.SuppressedError; delete globalThis.DisposableStack;`,
   },
@@ -87,7 +87,7 @@ const FEATURES = {
     strip: `delete Array.fromAsync;`,
   },
   'math-f16round': {
-    modules: ['_float16-impl.ts'],
+    modules: ['install-float16.ts'],
     dir: 'test/built-ins/Math/f16round',
     strip: `delete Math.f16round; delete DataView.prototype.getFloat16;
       delete DataView.prototype.setFloat16;`,

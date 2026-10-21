@@ -251,6 +251,7 @@ export const hideSymbolKeys = (): void => {
 // shim cannot follow the spec, since an ES5 engine converts keys with toString.
 const symbolProto: any = {};
 const hasOwnProp = Object.prototype.hasOwnProperty;
+const objectIsPrototypeOf = Object.prototype.isPrototypeOf;
 const isShimSymbol = (value: any): boolean =>
   value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === symbolProto && hasOwnProp.call(value, '__name__');
 const thisSymbolValue = (value: any, method: string): any => {
@@ -391,10 +392,20 @@ export const installSymbolPolyfill = (): void => {
   define((window as any), 'Symbol', SymbolPolyfill);
 };
 
+/*
+ * `Symbol('')` and `Symbol()` print alike, so the description getter can only
+ * tell them apart if it saw the call: the description wrapper below files every
+ * empty-string symbol here (core-js's EmptyStringDescriptionStore). Keyed by the
+ * symbol itself; each `Symbol('')` stays referenced, as in core-js.
+ */
+const emptyDescriptions: any = {};
+
 /**
  * Native but incomplete: Chrome 41 / Safari 8 ship Symbol.iterator but not
  * species, toStringTag, match/replace/search/split or isConcatSpreadable.
- * Backfill only what's missing, as real native symbols.
+ * Backfill only what's missing, as real native symbols, then the prototype
+ * halves core-js adds (es.symbol.to-primitive, es.symbol.to-string-tag) and its
+ * description wrapper (es.symbol.description).
  */
 const installSymbolExtensionsOnNative = (): void => {
   const NativeSymbol: any = (window as any).Symbol;
@@ -409,6 +420,73 @@ const installSymbolExtensionsOnNative = (): void => {
       /* frozen or non-extensible Symbol: nothing further we can do */
     }
   }
+
+  const SymbolPrototype: any = NativeSymbol.prototype;
+  const nativeValueOf = SymbolPrototype.valueOf;
+  try {
+    if (!hasOwnProp.call(SymbolPrototype, NativeSymbol.toPrimitive)) {
+      // thisSymbolValue through the native valueOf: it throws on anything but a symbol or its wrapper
+      const nativeSymbolToPrimitive = function (this: any, _hint: any): any {
+        return nativeValueOf.call(this);
+      };
+      try { defineProperty(nativeSymbolToPrimitive, 'name', { value: '[Symbol.toPrimitive]', configurable: true }); } catch (e) { /* pre-ES6 */ }
+      defineProperty(SymbolPrototype, NativeSymbol.toPrimitive, { value: nativeSymbolToPrimitive, writable: false, enumerable: false, configurable: true });
+    }
+    if (!hasOwnProp.call(SymbolPrototype, NativeSymbol.toStringTag)) {
+      defineProperty(SymbolPrototype, NativeSymbol.toStringTag, { value: 'Symbol', writable: false, enumerable: false, configurable: true });
+    }
+  } catch (e) {
+    /* frozen Symbol.prototype: nothing further we can do */
+  }
+
+  // core-js's es.symbol.description gate: no description, or Safari 12's
+  // Symbol().description that is not undefined.
+  try {
+    if ('description' in SymbolPrototype && NativeSymbol().description === undefined) return;
+  } catch (e) {
+    return;
+  }
+  // Still real native symbols; only the constructor is ours. No parameters, so
+  // length is 0 (the native's is 1 on Chrome 41).
+  const SymbolWrapper: any = function Symbol(this: any): any {
+    const arg = arguments[0];
+    let description: string | undefined;
+    if (arguments.length > 0 && arg !== undefined) {
+      // inlined: ToString(arg) -- String() uses hint string; a Symbol throws
+      if (typeof arg === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      description = String(arg);
+    }
+    // `new Symbol()`: the native's own TypeError
+    if (this !== undefined && this !== null && objectIsPrototypeOf.call(SymbolPrototype, this)) return new NativeSymbol(description);
+    const result = description === undefined ? NativeSymbol() : NativeSymbol(description);
+    if (description === '') emptyDescriptions[result] = true;
+    return result;
+  };
+  // core-js's copyConstructorProperties: every static the native has (well-knowns, for, keyFor)
+  const names = Object.getOwnPropertyNames(NativeSymbol);
+  for (let i = 0; i < names.length; i++) {
+    if (hasOwnProp.call(SymbolWrapper, names[i])) continue;
+    try { defineProperty(SymbolWrapper, names[i], Object.getOwnPropertyDescriptor(NativeSymbol, names[i])!); } catch (e) { /* skip */ }
+  }
+  // Symbol.for('') is an empty-string symbol too
+  const nativeFor = NativeSymbol['for'];
+  const symbolFor = function (key: any): any {
+    const stringKey = String(key);
+    const symbol = nativeFor.call(NativeSymbol, stringKey);
+    if (stringKey === '') emptyDescriptions[symbol] = true;
+    return symbol;
+  };
+  try { defineProperty(symbolFor, 'name', { value: 'for', configurable: true }); } catch (e) { /* pre-ES6 */ }
+  try {
+    defineProperty(SymbolWrapper, 'for', { value: symbolFor, writable: true, enumerable: false, configurable: true });
+    SymbolWrapper.prototype = SymbolPrototype;
+    defineProperty(SymbolPrototype, 'constructor', { value: SymbolWrapper, writable: true, enumerable: false, configurable: true });
+    // Not define(): its __polyfilled stamp on Symbol switches on the '@@' key
+    // filters, which only the shim needs.
+    defineProperty(window, 'Symbol', { value: SymbolWrapper, writable: true, enumerable: false, configurable: true });
+  } catch (e) {
+    /* locked-down Symbol or window: keep the native */
+  }
 };
 
 export const install = (): void => {
@@ -421,24 +499,28 @@ export const install = (): void => {
 
 /**
  * `Symbol.prototype.description` (ES2019). Separate gate: Chrome 38-69 and
- * Safari 9.1-11.1 ship Symbol without it. Recovered from toString().
- *
- * Known limitations:
- * - [unfixable] `Symbol()` and `Symbol('')` both stringify to `"Symbol()"`, so
- *   this returns `''` for both where the spec wants `undefined` for the first.
+ * Safari 9.1-11.1 ship Symbol without it. Recovered from toString(), with
+ * `Symbol('')` told apart from `Symbol()` through emptyDescriptions.
  */
+let descriptionValueOf: any;
 export const symbolDescription = function (this: any): string | undefined {
+  // thisSymbolValue: the native valueOf throws on anything but a symbol
+  const symbol = descriptionValueOf.call(this);
+  if (hasOwnProp.call(emptyDescriptions, symbol)) return '';
   // .call rather than this.toString(): a symbol-keyed object could shadow
   // toString, and the accessor must read the real one.
-  const text = Symbol.prototype.toString.call(this);
-  return text.slice(7, text.length - 1);
+  const text = Symbol.prototype.toString.call(symbol);
+  const description = text.slice(7, text.length - 1);
+  return description === '' ? undefined : description;
 };
 
 const installDescription = (): void => {
   try {
-    if (typeof Symbol === 'undefined' || (Symbol as any)('probe').description === 'probe') {
+    // core-js's gate: present, and Symbol().description undefined (Safari 12 gets it wrong)
+    if (typeof Symbol === 'undefined' || ((Symbol as any)('probe').description === 'probe' && (Symbol as any)().description === undefined)) {
       return;
     }
+    descriptionValueOf = (Symbol as any).prototype.valueOf;
   } catch (e) {
     return;
   }

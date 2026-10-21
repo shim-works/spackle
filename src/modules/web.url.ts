@@ -39,9 +39,9 @@ export const isSupported = (): boolean => {
  * the record (its `_url` slot) and writes the query back on every mutation.
  *
  * Known limitations:
- * - [incomplete] Non-ASCII and xn-- hosts go through the engine's own anchor
- *   parser for domain-to-ASCII (no UTS 46 tables here), so they are only as
- *   right as that engine's IDNA.
+ * - [incomplete] Domain to ASCII is core-js's UTS #46 subset plus punycode: no
+ *   mapping table, NFC, CheckJoiners or CheckBidi, and xn-- labels are not
+ *   decoded back for validation.
  * - [incomplete] With a native URLSearchParams underneath, a params change is
  *   only seen when it changes the serialization.
  */
@@ -320,25 +320,146 @@ const parseIPv6 = (input: string): any => {
   return '[' + out + ']';
 };
 
-// domain to ASCII. Pure ASCII without xn-- labels is lowercased here; anything
-// else goes through the engine's anchor (its own IDNA), made once.
-let idnaAnchor: any = null;
+/*
+ * Domain to ASCII, as core-js's web.url does it: a subset of UTS #46 (the
+ * ignored and disallowed code points, full-width forms, and the code points
+ * that map onto a forbidden domain code point), lowercasing, then punycode for
+ * every non-ASCII label (core-js's string-punycode-to-ascii, after punycode.js).
+ * No mapping table, NFC, CheckJoiners or CheckBidi: such domains are punycoded
+ * as they come, and labels that arrive as xn-- are not decoded back.
+ */
+// UTS #46 maps these onto a string holding a forbidden domain code point, so a
+// domain with one is rejected (core-js's MAPPED_ONTO_FORBIDDEN)
+const MAPPED_ONTO_FORBIDDEN = '¨¯´¸˘˙˚˛˜˝ͺ΄΅᾽᾿῀' +
+  '῁῍῎῏῝῞῟῭΅´῾‗‾⁇⁈⁉' +
+  '℀℁℅℆⩴゛゜ﱞﱟﱠﱡﱢﱣﷺﷻ︓' +
+  '︖﹇﹈﹉﹊﹋﹌﹕﹖﹟﹤﹥﹨﹪﹫ﹰ' +
+  'ﹲﹴﹶﹸﹺﹼﹾ￣';
 const domainToASCII = (domain: string): any => {
-  if (!/[^\u0000-\u007f]/.test(domain) && !/(^|\.)xn--/i.test(domain)) {
-    const lower = domain.toLowerCase();
-    return lower === '' ? FAILURE : lower;
+  // an ASCII domain needs no mapping and no punycode: the common case, no allocation past the lowercase
+  if (!/[^\u0000-\u007f]/.test(domain)) return domain === '' ? FAILURE : domain.toLowerCase();
+  let mapped = '';
+  for (let i = 0; i < domain.length; i++) {
+    // inlined: code point at i -- a surrogate pair is one code point
+    let code = domain.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < domain.length) {
+      const low = domain.charCodeAt(i + 1);
+      if ((low & 0xfc00) === 0xdc00) {
+        code = ((code & 0x3ff) << 10) + (low & 0x3ff) + 0x10000;
+        i++;
+      }
+    }
+    // inlined: isDisallowedCodePoint(code) -- U+FFFD, lone surrogates, C1 controls,
+    // bidi formatting and separators, noncharacters, private use
+    if (
+      code === 0xfffd || (code >= 0xd800 && code <= 0xdfff) || (code >= 0x80 && code <= 0x9f) ||
+      (code >= 0x200e && code <= 0x200f) || (code >= 0x2028 && code <= 0x2029) ||
+      (code >= 0x202a && code <= 0x202e) || (code >= 0x2065 && code <= 0x2069) ||
+      (code >= 0xfdd0 && code <= 0xfdef) || (code & 0xfffe) === 0xfffe ||
+      (code >= 0xe000 && code <= 0xf8ff) || (code >= 0xf0000 && code <= 0x10fffd)
+    ) return FAILURE;
+    // inlined: isIgnoredCodePoint(code)
+    if (
+      code === 0xad || code === 0x34f || code === 0x200b || code === 0x3164 || code === 0xfeff || code === 0xffa0 ||
+      (code >= 0x115f && code <= 0x1160) || (code >= 0x17b4 && code <= 0x17b5) || (code >= 0x180b && code <= 0x180f) ||
+      (code >= 0x2060 && code <= 0x2064) || (code >= 0x206a && code <= 0x206f) || (code >= 0xfe00 && code <= 0xfe0f) ||
+      (code >= 0xe0100 && code <= 0xe01ef)
+    ) continue;
+    // inlined: mapCodePoint(code) -- full-width forms down to ASCII; spaces and the
+    // MAPPED_ONTO_FORBIDDEN list to a space, which parseHost then rejects
+    if (code >= 0xff01 && code <= 0xff5e) code -= 0xfee0;
+    else if (
+      code === 0xa0 || code === 0x1680 || code === 0x202f || code === 0x205f || code === 0x3000 ||
+      (code >= 0x2000 && code <= 0x200a) ||
+      (code <= 0xffff && MAPPED_ONTO_FORBIDDEN.indexOf(String.fromCharCode(code)) !== -1)
+    ) code = 0x20;
+    mapped += code > 0xffff
+      ? String.fromCharCode(0xd800 + ((code - 0x10000) >> 10), 0xdc00 + ((code - 0x10000) & 0x3ff))
+      : String.fromCharCode(code);
   }
-  // a delimiter would make the anchor parse something else; forbidden anyway
-  if (/[\u0000-\u0020#%/:<>?@[\\\]^|\u007f]/.test(domain)) return FAILURE;
-  try {
-    if (idnaAnchor === null) idnaAnchor = document.createElement('a');
-    idnaAnchor.href = 'http://' + domain + '/';
-    const host = String(idnaAnchor.hostname || '');
-    if (host === '' || /[^\u0000-\u007f]/.test(host)) return FAILURE;
-    return host.toLowerCase();
-  } catch (e) {
-    return FAILURE;
+  if (mapped === '') return FAILURE;
+
+  // inlined: toASCII(mapped) -- lowercase, split on the IDNA separators, punycode non-ASCII labels
+  const labels = mapped.toLowerCase().replace(/[.。．｡]/g, '.').split('.');
+  let out = '';
+  for (let l = 0; l < labels.length; l++) {
+    const label = labels[l];
+    if (l > 0) out += '.';
+    if (!/[^\0-~]/.test(label)) {
+      out += label;
+      continue;
+    }
+    // inlined: ucs2decode(label)
+    const input: number[] = [];
+    for (let i = 0; i < label.length; i++) {
+      const value = label.charCodeAt(i);
+      if (value >= 0xd800 && value <= 0xdbff && i + 1 < label.length) {
+        const extra = label.charCodeAt(i + 1);
+        if ((extra & 0xfc00) === 0xdc00) {
+          input.push(((value & 0x3ff) << 10) + (extra & 0x3ff) + 0x10000);
+          i++;
+          continue;
+        }
+      }
+      input.push(value);
+    }
+    // inlined: encode(input) -- RFC 3492: base 36, tMin 1, tMax 26, skew 38, damp 700, bias 72, n 128
+    let encoded = '';
+    for (let i = 0; i < input.length; i++) {
+      if (input[i] < 0x80) encoded += String.fromCharCode(input[i]);
+    }
+    const basicLength = encoded.length;
+    let handled = basicLength;
+    if (basicLength) encoded += '-';
+    let n = 0x80;
+    let delta = 0;
+    let bias = 72;
+    while (handled < input.length) {
+      let m = 0x7fffffff;
+      for (let i = 0; i < input.length; i++) {
+        if (input[i] >= n && input[i] < m) m = input[i];
+      }
+      const handledPlusOne = handled + 1;
+      // overflow: core-js throws a RangeError here; a host that cannot encode is a failure
+      if (m - n > Math.floor((0x7fffffff - delta) / handledPlusOne)) return FAILURE;
+      delta += (m - n) * handledPlusOne;
+      n = m;
+      for (let i = 0; i < input.length; i++) {
+        const current = input[i];
+        if (current < n && ++delta > 0x7fffffff) return FAILURE;
+        if (current === n) {
+          // delta as a generalized variable-length integer
+          let q = delta;
+          for (let k = 36; ; k += 36) {
+            const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias;
+            if (q < t) break;
+            const qMinusT = q - t;
+            const baseMinusT = 36 - t;
+            // inlined: digitToBasic(digit) -- 0..25 to a..z, 26..35 to 0..9
+            const digit = t + (qMinusT % baseMinusT);
+            encoded += String.fromCharCode(digit + 22 + (digit < 26 ? 75 : 0));
+            q = Math.floor(qMinusT / baseMinusT);
+          }
+          encoded += String.fromCharCode(q + 22 + (q < 26 ? 75 : 0));
+          // inlined: adapt(delta, handledPlusOne, handled === basicLength)
+          let d = handled === basicLength ? Math.floor(delta / 700) : delta >> 1;
+          d += Math.floor(d / handledPlusOne);
+          let k = 0;
+          while (d > 455) {
+            d = Math.floor(d / 35);
+            k += 36;
+          }
+          bias = Math.floor(k + (36 * d) / (d + 38));
+          delta = 0;
+          handled++;
+        }
+      }
+      delta++;
+      n++;
+    }
+    out += 'xn--' + encoded;
   }
+  return out;
 };
 
 const parseHost = (input: string, isOpaque: boolean): any => {

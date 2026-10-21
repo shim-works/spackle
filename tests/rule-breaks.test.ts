@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { arrayPush } from '../src/modules/es.array.push.js';
 import { regexpTest } from '../src/modules/es.regexp.test.js';
-import { isSupported as typedArraySupported, isModernSupported } from '../src/modules/_typed-array-impl.js';
+import { isSupported as typedArraySupported, isModernSupported } from '../src/modules/install-typed-array.js';
 import { stringPadStart } from '../src/modules/es.string.pad-start.js';
 import { stringPadEnd } from '../src/modules/es.string.pad-end.js';
-import { iteratorConcat } from '../src/modules/_iterator-impl.js';
+import { iteratorConcat } from '../src/modules/install-iterator.js';
 import { mathSumPrecise } from '../src/modules/es.math.sum-precise.js';
 import { Map as MapPolyfill } from '../src/modules/es.map.js';
 import { Set as SetPolyfill } from '../src/modules/es.set.js';
@@ -259,7 +259,7 @@ describe('rule breaks — install-time fixes', () => {
     w.DOMException = Fake;
     vi.resetModules();
     try {
-      const { install, isSupported } = await import('../src/modules/_dom-exception-impl.js');
+      const { installDomException: install, isSupported } = await import('../src/modules/install-dom-exception.js');
       expect(isSupported()).toBe(false); // the fake took effect
       install();
       const e = new w.DOMException('m', 'SyntaxError');

@@ -35,6 +35,8 @@ export const functionHasInstance = function (this: any, value: any): boolean {
   }
   const target = this.prototype;
   if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
+    // Bound functions have no prototype; the engine's instanceof follows the target.
+    if (!('prototype' in this)) return value instanceof this;
     throw new TypeError('Function has non-object prototype in instanceof check');
   }
   let proto = Object.getPrototypeOf(value);

@@ -761,6 +761,18 @@ export const isModernSupported = (): boolean => {
     } catch {
       // good -- that's the throw we wanted
     }
+    // core-js's es.typed-array.set probes: array-likes at an offset, and ToObject
+    // on primitives (V8 issue 11294)
+    try {
+      const clamped = new Uint8ClampedArray(2);
+      clamped.set({ length: 1, 0: 3 } as any, 1);
+      const int8 = new Int8Array(2);
+      int8.set(1 as any);
+      int8.set('2' as any, 1);
+      if (clamped[1] !== 3 || int8[0] !== 0 || int8[1] !== 2) return false;
+    } catch {
+      return false;
+    }
     return true;
   } catch {
     return false;
@@ -929,8 +941,21 @@ const installTypedArrayExtensionsOnNative = (): void => {
     // per-name presence check would skip it. Replace it only when the behavioural
     // probe above said the native one is wrong.
     const setIsBroken = (function () {
+      if (typeof Uint8Array === "undefined") return false;
+      // core-js's es.typed-array.set probes: array-likes at an offset, and ToObject
+      // on primitives (Chrome 41 throws "invalid_argument"; V8 issue 11294)
       try {
-        if (typeof Uint8Array === "undefined") return false;
+        const clamped = new Uint8ClampedArray(2);
+        clamped.set({ length: 1, 0: 3 } as any, 1);
+        const int8 = new Int8Array(2);
+        int8.set(1 as any);
+        int8.set('2' as any, 1);
+        if (clamped[1] !== 3 || int8[0] !== 0 || int8[1] !== 2) return true;
+      } catch {
+        return true;
+      }
+      // and a source that doesn't fit must throw RangeError, not truncate
+      try {
         new Uint8Array(2).set([1, 2, 3] as any);
         return true;
       } catch {
@@ -1035,7 +1060,7 @@ const unifyIterators = (): void => {
   }
 };
 
-export const install = (): void => {
+export const installTypedArray = (): void => {
   installTypedArrayPolyfill();
   installTypedArrayExtensionsOnNative();
   unifyIterators();

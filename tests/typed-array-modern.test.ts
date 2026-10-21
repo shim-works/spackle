@@ -8,11 +8,11 @@ import {
   typedArraySet,
   typedArrayFrom,
   typedArrayOf,
-} from '../src/modules/_typed-array-impl.js';
+} from '../src/modules/install-typed-array.js';
 
 /**
  * The ES2023 typed-array additions plus the from/of statics — gate 2 in
- * _typed-array-impl.ts. Implementations are exercised directly, since whether
+ * install-typed-array.ts. Implementations are exercised directly, since whether
  * they install depends on how modern the host's typed arrays already are.
  */
 describe('gate separation', () => {

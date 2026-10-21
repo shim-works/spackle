@@ -19,7 +19,8 @@ const withStickyRejectingRegExp = async (body: (island: any) => void): Promise<v
   const RealRegExp = globalThis.RegExp;
 
   const FakeRegExp: any = function (this: any, source?: any, flags?: any) {
-    if (typeof flags === 'string' && flags.indexOf('y') !== -1) {
+    // Chrome 41 rejects both y and s
+    if (typeof flags === 'string' && (flags.indexOf('y') !== -1 || flags.indexOf('s') !== -1)) {
       throw new SyntaxError('Invalid flags supplied to RegExp constructor');
     }
     return new RealRegExp(source, flags);
@@ -70,6 +71,37 @@ describe('sticky emulation on an engine that rejects the y flag', () => {
       expect(hit && hit[0]).toBe('a');
       expect(sticky.lastIndex).toBe(1);
       expect(sticky.test('a_a')).toBe(false); // lastIndex 1 again, still '_'
+    });
+  });
+});
+
+describe('RegExp.prototype.sticky getter (core-js es.regexp.sticky)', () => {
+  it('answers false for real RegExps, undefined on the prototype, and rejects the rest', async () => {
+    const { regexpStickyGetter: get } = await import('../src/modules/es.regexp.constructor.js');
+    expect(get.call(/a/)).toBe(false);
+    expect(get.call(RegExp.prototype)).toBe(undefined);
+    for (const bad of [{}, [], undefined, null, 4, 'string']) expect(() => get.call(bad)).toThrow(TypeError);
+  });
+});
+
+describe('dotAll emulation on an engine that rejects the s flag', () => {
+  it('lets . match line terminators only with s, outside classes and escapes', async () => {
+    await withStickyRejectingRegExp(({ RegExpPolyfill }) => {
+      const R: any = RegExpPolyfill;
+      const dot = new R('a.b', 's');
+      expect(dot.test('a\nb')).toBe(true);
+      expect(dot.test('a\u2028b')).toBe(true);
+      expect(dot.dotAll).toBe(true);
+      expect(dot.flags).toBe('s');
+      expect(new R('a.b').test('a\nb')).toBe(false);
+      expect(new R('a\\.b', 's').test('a\nb')).toBe(false); // escaped dot stays literal
+      expect(new R('[.]', 's').test('\n')).toBe(false); // a dot in a class stays literal
+      expect(new R('a.', 'gsi').flags).toBe('gis');
+      const both = new R('a.', 'sy');
+      expect(both.flags).toBe('sy');
+      expect(both.dotAll).toBe(true);
+      expect(both.exec('a\n')).not.toBe(null);
+      expect(() => new R('a', 'ss')).toThrow(SyntaxError);
     });
   });
 });

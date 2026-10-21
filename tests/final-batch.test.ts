@@ -5,7 +5,7 @@ import {
   dataViewSetFloat16,
   doubleToFloat16Bits,
   float16BitsToDouble,
-} from '../src/modules/_float16-impl.js';
+} from '../src/modules/install-float16.js';
 import { mathSumPrecise } from '../src/modules/es.math.sum-precise.js';
 import { arrayFromAsync } from '../src/modules/es.array.from-async.js';
 

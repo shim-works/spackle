@@ -14,9 +14,9 @@ import { stringIncludes } from '../src/modules/es.string.includes.js';
 import { stringTrim } from '../src/modules/es.string.trim.js';
 import { stringTrimStart } from '../src/modules/es.string.trim-start.js';
 import { arrayFrom } from '../src/modules/es.array.from.js';
-import { iteratorMap } from '../src/modules/_iterator-impl.js';
-import { setIsSupersetOf } from '../src/modules/_set-methods-impl.js';
-import { typedArrayAt, typedArrayFind } from '../src/modules/_typed-array-impl.js';
+import { iteratorMap } from '../src/modules/install-iterator.js';
+import { setIsSupersetOf } from '../src/modules/install-set-methods.js';
+import { typedArrayAt, typedArrayFind } from '../src/modules/install-typed-array.js';
 
 /**
  * One block per row of the spec-fix plan. Each case names the spec rule it

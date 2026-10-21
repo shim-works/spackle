@@ -5,7 +5,7 @@ import {
   uint8ArrayFromHex,
   uint8ArraySetFromBase64,
   uint8ArraySetFromHex,
-} from '../src/modules/_uint8-array-impl.js';
+} from '../src/modules/install-uint8-array.js';
 import { noDetachDetection } from './engine-capabilities.js';
 
 /**

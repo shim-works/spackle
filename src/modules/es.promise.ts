@@ -111,7 +111,7 @@ const scheduleDrain = (): ((fn: () => void) => void) => {
    */
   let fast: () => void;
   // A native MutationObserver can't stall, so it skips the timer.
-  // MessageChannel keeps it, as in _set-immediate-impl.
+  // MessageChannel keeps it, as in install-set-immediate.
   let needsBackup = true;
 
   if (MO && w.document && !brokenObserver) {
@@ -244,6 +244,18 @@ export const install = (): void => {
   };
   try { Object.defineProperty(promiseCatch, 'name', { value: 'catch', configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
   Object.defineProperty((PromisePolyfillImpl as any).prototype, 'catch', { value: promiseCatch, writable: true, enumerable: false, configurable: true });
+  // Built-in constructors' prototype property is non-writable (non-enumerable and non-configurable already, as on any function).
+  Object.defineProperty(PromisePolyfillImpl, 'prototype', { writable: false });
+  // core-js's setSpecies: get [Symbol.species]() { return this; }
+  const species = typeof Symbol === 'function' ? (Symbol as any).species : undefined;
+  if (species && !Object.prototype.hasOwnProperty.call(PromisePolyfillImpl, species)) {
+    Object.defineProperty(PromisePolyfillImpl, species, { get: function (this: any) { return this; }, enumerable: false, configurable: true });
+  }
+  // core-js's setToStringTag(Promise, 'Promise'): non-writable, non-enumerable, configurable.
+  const toStringTag = typeof Symbol === 'function' ? (Symbol as any).toStringTag : undefined;
+  if (toStringTag && !Object.prototype.hasOwnProperty.call((PromisePolyfillImpl as any).prototype, toStringTag)) {
+    Object.defineProperty((PromisePolyfillImpl as any).prototype, toStringTag, { value: 'Promise', writable: false, enumerable: false, configurable: true });
+  }
 
   define((window as any), 'Promise', PromisePolyfillImpl);
 };

@@ -56,6 +56,10 @@ describe('String.prototype.trim — test262 conformance', () => {
     it('does not remove non-whitespace lookalikes (U+200B zero-width)', () => {
       expect(trim('​abc​')).toBe('​abc​');
     });
+
+    it('does not remove U+180E, U+200B or U+0085 (core-js string-trim-forced)', () => {
+      expect(trim('᠎​\u0085a\u0085​᠎')).toBe('᠎​\u0085a\u0085​᠎');
+    });
   });
 
   describe('parity vs native', () => {

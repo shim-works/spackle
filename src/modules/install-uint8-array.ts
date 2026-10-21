@@ -436,7 +436,7 @@ const SPEC_LENGTH: { [key: string]: number } = {
   fromHex: 1,
 };
 
-export const install = (): void => {
+export const installUint8Array = (): void => {
   if (typeof Uint8Array !== 'undefined') {
     const proto = Uint8Array.prototype as any;
     const protoMethods: [string, Function][] = [

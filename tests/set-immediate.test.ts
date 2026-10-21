@@ -1,4 +1,4 @@
-import { setImmediate as setImmediatePolyfill, clearImmediate as clearImmediatePolyfill } from '../src/modules/_set-immediate-impl.js';
+import { setImmediate as setImmediatePolyfill, clearImmediate as clearImmediatePolyfill } from '../src/modules/install-set-immediate.js';
 
 
 /**

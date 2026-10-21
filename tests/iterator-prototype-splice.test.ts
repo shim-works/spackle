@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { install as installArrayIterator, arrayEntries, arrayKeys, arrayValues } from '../src/modules/es.array.iterator.js';
 import { stringIterator } from '../src/modules/es.string.iterator.js';
 import { stringMatchAll } from '../src/modules/es.string.match-all.js';
-import { typedArrayValues } from '../src/modules/_typed-array-impl.js';
+import { typedArrayValues } from '../src/modules/install-typed-array.js';
 import { domCollectionValues } from '../src/modules/web.dom-collections.iterator.js';
-import { install as installIteratorImpl } from '../src/modules/_iterator-impl.js';
+import { installIterator } from '../src/modules/install-iterator.js';
 
 /**
  * The iterator-helper reach: every iterator has to inherit from
@@ -88,7 +88,7 @@ describe('the splice pass', () => {
     try {
       expect(([] as any)[Symbol.iterator]().map).toBeUndefined();
 
-      installIteratorImpl();
+      installIterator();
 
       expect(Object.getPrototypeOf(arrayIterProto)).toBe(iteratorProto);
       expect(typeof ([] as any)[Symbol.iterator]().map).toBe('function');
@@ -107,7 +107,7 @@ describe('the splice pass', () => {
       installArrayIterator();
       expect(Array.prototype.values).toBe((Array.prototype as any)[Symbol.iterator]);
 
-      installIteratorImpl();
+      installIterator();
 
       const iterator: any = ([1, 2] as any).values();
       expect(typeof iterator.map).toBe('function');
@@ -125,7 +125,7 @@ describe('the splice pass', () => {
   it('never re-parents Object.prototype', () => {
     const objectProtoParent = Object.getPrototypeOf(Object.prototype);
 
-    installIteratorImpl();
+    installIterator();
 
     expect(Object.getPrototypeOf(Object.prototype)).toBe(objectProtoParent);
     expect((Object.prototype as any).map).toBeUndefined();
@@ -153,7 +153,7 @@ describe('the splice pass tags native iterator prototypes (core-js iterator-defi
       const saved = Object.getOwnPropertyDescriptor(proto, TAG);
       try {
         delete proto[TAG];
-        installIteratorImpl();
+        installIterator();
         const d = Object.getOwnPropertyDescriptor(proto, TAG)!;
         expect(d.value).toBe(tag);
         expect([d.writable, d.enumerable, d.configurable]).toEqual([false, false, true]);

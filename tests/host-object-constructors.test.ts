@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { uint8ArrayToBase64, uint8ArrayToHex } from '../src/modules/_uint8-array-impl.js';
-import { arrayBufferIsView } from '../src/modules/_array-buffer-impl.js';
+import { uint8ArrayToBase64, uint8ArrayToHex } from '../src/modules/install-uint8-array.js';
+import { arrayBufferIsView } from '../src/modules/install-array-buffer.js';
 
 /**
  * Safari 7.1 exposes ArrayBuffer and the typed-array constructors as HOST

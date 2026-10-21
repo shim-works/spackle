@@ -182,8 +182,10 @@ const cloneValue = (value: any, seen: any): any => {
   }
 
   if (value instanceof RegExp) {
-    const copy = new RegExp(value.source, (value as any).flags || '');
-    copy.lastIndex = value.lastIndex;
+    // lastIndex is not serialised. Flags come from the booleans where the engine has no RegExp#flags (Chrome 41).
+    const flags = (value as any).flags;
+    const copy = new RegExp(value.source, typeof flags === 'string' ? flags
+      : (value.global ? 'g' : '') + (value.ignoreCase ? 'i' : '') + (value.multiline ? 'm' : '') + ((value as any).sticky ? 'y' : '') + ((value as any).unicode ? 'u' : ''));
     seen.set(value, copy);
     return copy;
   }
@@ -275,5 +277,6 @@ const cloneValue = (value: any, seen: any): any => {
 };
 
 export const structuredClone = function (value: any, _options?: any): any {
+  if (arguments.length === 0) throw new TypeError("Failed to execute 'structuredClone' on 'Window': 1 argument required, but only 0 present.");
   return cloneValue(value, makeSeen());
 };

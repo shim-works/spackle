@@ -2,8 +2,8 @@ import {
   SuppressedError,
   DisposableStack,
   AsyncDisposableStack,
-  install as installDisposable,
-} from '../src/modules/_disposable-impl.js';
+  installDisposable,
+} from '../src/modules/install-disposable.js';
 
 // The island is a pure implementation now -- src/install-polyfills.ts decides
 // when it installs, so a test that asserts on globals has to say so.
@@ -265,7 +265,7 @@ describe('brand checks (from test262)', () => {
 describe('constructor shape (from test262)', () => {
   it('SuppressedError inherits from Error', () => {
     // Identity, not strict equality: es.error.cause replaces window.Error with
-    // a wrapper on engines lacking Error.cause, and _disposable-impl captured
+    // a wrapper on engines lacking Error.cause, and install-disposable captured
     // the pre-wrap native (it sorts earlier in the load order). The wrapper
     // shares the native's .prototype, so the chain is intact either way.
     const proto: any = Object.getPrototypeOf(SuppressedError);

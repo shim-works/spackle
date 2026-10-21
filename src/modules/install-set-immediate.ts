@@ -1,4 +1,5 @@
 // ids: web.immediate, web.timers
+import { define } from '../define.js';
 
 export const isSupported = (): boolean => {
   try {
@@ -105,4 +106,9 @@ export const clearImmediate = function (handle: number): void {
     fns[slot] = undefined;
     argsQ[slot] = undefined;
   }
+};
+
+export const installSetImmediate = (): void => {
+  define(window, 'setImmediate', setImmediate);
+  define(window, 'clearImmediate', clearImmediate);
 };

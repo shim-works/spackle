@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /**
- * Chrome 38/41 have no %IteratorPrototype% at all, so `_iterator-impl` builds
+ * Chrome 38/41 have no %IteratorPrototype% at all, so `install-iterator` builds
  * one at module-eval time and splices it into the iterator chains at install.
  *
  * Testing that needs the module re-evaluated with the chain ALREADY broken --
@@ -26,8 +26,8 @@ describe('an engine with no %IteratorPrototype% at all', () => {
     for (const proto of others) Object.setPrototypeOf(proto, Object.prototype);
     vi.resetModules();
     try {
-      const fresh = await import('../src/modules/_iterator-impl.js');
-      fresh.install();
+      const fresh = await import('../src/modules/install-iterator.js');
+      fresh.installIterator();
 
       const spliced = Object.getPrototypeOf(arrayIterProto);
       expect(spliced).not.toBe(Object.prototype);

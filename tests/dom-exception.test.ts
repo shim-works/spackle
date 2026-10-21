@@ -1,4 +1,4 @@
-import { DOMExceptionPolyfill } from '../src/modules/_dom-exception-impl.js';
+import { DOMExceptionPolyfill } from '../src/modules/install-dom-exception.js';
 
 
 describe('DOMException — polyfill vs native', () => {

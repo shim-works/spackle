@@ -203,7 +203,7 @@ const scheduleDrain = (): ((fn: () => void) => void) => {
    */
   let fast: () => void;
   // A native MutationObserver can't stall, so it skips the timer.
-  // MessageChannel keeps it, as in _set-immediate-impl.
+  // MessageChannel keeps it, as in install-set-immediate.
   let needsBackup = true;
 
   if (MO && w.document && !brokenObserver) {

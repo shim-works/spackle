@@ -1,4 +1,4 @@
-import { arrayBufferIsView, arrayBufferSlice, isArrayBufferSupported } from '../src/modules/_array-buffer-impl.js';
+import { arrayBufferIsView, arrayBufferSlice, isArrayBufferSupported } from '../src/modules/install-array-buffer.js';
 
 
 describe('ArrayBuffer.isView — polyfill vs native', () => {

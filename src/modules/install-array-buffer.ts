@@ -127,7 +127,7 @@ export const arrayBufferSlice = function slice(this: any, start?: any, end?: any
   return created;
 };
 
-export const install = (): void => {
+export const installArrayBuffer = (): void => {
   if (typeof ArrayBuffer !== 'undefined') {
     if (typeof (ArrayBuffer as any).isView !== 'function') {
       define((ArrayBuffer as any), 'isView', arrayBufferIsView);

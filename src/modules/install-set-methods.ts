@@ -371,7 +371,7 @@ export const isSupported = (): boolean => {
 // methods user code patched later.
 if (typeof Set !== 'undefined') bind();
 
-export const install = (): void => {
+export const installSetMethods = (): void => {
   bind();
   if (!proto) return;
   // Per-method, so a partial engine gets only the members it is missing --

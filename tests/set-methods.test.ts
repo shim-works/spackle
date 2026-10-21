@@ -7,7 +7,7 @@ import {
   setIsSupersetOf,
   setIsDisjointFrom,
   isSupported,
-} from '../src/modules/_set-methods-impl.js';
+} from '../src/modules/install-set-methods.js';
 
 /**
  * Conformance for the ES2024 Set methods island. core-js tracks these as seven

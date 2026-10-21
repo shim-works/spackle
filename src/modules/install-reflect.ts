@@ -310,3 +310,8 @@ for (const name in methods) {
   defineProp(methods[name], '__polyfilled', { value: true });
   defineProp(Reflect, name, { value: methods[name], writable: true, enumerable: false, configurable: true });
 }
+
+export const installReflect = (): void => {
+  Object.defineProperty(window, 'Reflect', { value: Reflect, writable: true, enumerable: false, configurable: true });
+  Object.defineProperty(Reflect, '__polyfilled', { value: true });
+};

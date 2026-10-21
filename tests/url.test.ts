@@ -37,3 +37,20 @@ describe('URL — polyfill', () => {
     expect(() => new URL('not-a-url')).toThrow();
   });
 });
+
+describe('URL host domain-to-ASCII (core-js UTS #46 subset + punycode)', () => {
+  it('punycodes non-ASCII labels nontransitionally and rejects disallowed code points', async () => {
+    const { URLPolyfill } = await import('../src/modules/web.url.js');
+    const host = (input: string) => new (URLPolyfill as any)('https://' + input + '/').host;
+    expect(host('faß.ExAmPlE')).toBe('xn--fa-hia.example');
+    expect(host('ß')).toBe('xn--zca');
+    expect(host('a†--')).toBe('xn--a---kp0a');
+    expect(host('-x.ß')).toBe('-x.xn--zca');
+    expect(host('münchen。de')).toBe('xn--mnchen-3ya.de');
+    expect(host('ｅｘａｍｐｌｅ.com')).toBe('example.com');
+    expect(host('a­b')).toBe('ab');
+    expect(() => host('a�b')).toThrow(TypeError);
+    expect(() => host('a b')).toThrow(TypeError);
+    expect(host('Example.COM')).toBe('example.com');
+  });
+});

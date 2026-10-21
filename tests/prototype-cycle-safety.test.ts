@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Reflect as ReflectPolyfill } from '../src/modules/_reflect-impl.js';
-import { install as installIteratorImpl } from '../src/modules/_iterator-impl.js';
+import { Reflect as ReflectPolyfill } from '../src/modules/install-reflect.js';
+import { installIterator } from '../src/modules/install-iterator.js';
 
 /**
  * Nothing that walks a prototype chain may loop forever.
@@ -43,7 +43,7 @@ describe('prototype walks are bounded', () => {
   });
 
   it('the splice pass leaves every chain terminating', { timeout: 2000 }, () => {
-    installIteratorImpl();
+    installIterator();
 
     const walk = (value: any): number => {
       let current = value;
@@ -72,7 +72,7 @@ describe('prototype walks are bounded', () => {
     // Frozen prototypes are the other engine-dependent path through setProtoOf.
     const frozen = Object.freeze({ next: function () {} });
     const before = Object.getPrototypeOf(frozen);
-    installIteratorImpl();
+    installIterator();
     expect(Object.getPrototypeOf(frozen)).toBe(before);
   });
 });

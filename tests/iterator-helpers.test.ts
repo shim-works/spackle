@@ -12,7 +12,7 @@ import {
   iteratorFind,
   iteratorFrom,
   iteratorConcat,
-} from '../src/modules/_iterator-impl.js';
+} from '../src/modules/install-iterator.js';
 
 /**
  * https://tc39.es/ecma262/#sec-iterator-helper-objects

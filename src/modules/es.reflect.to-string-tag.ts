@@ -1,4 +1,4 @@
-// Needs Symbol.toStringTag and a Reflect to tag (native, or the _reflect-impl
+// Needs Symbol.toStringTag and a Reflect to tag (native, or the install-reflect
 // island if that installed one). Without either there is nothing to attach, so
 // report supported and no-op.
 const tagKey =

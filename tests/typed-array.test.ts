@@ -1,4 +1,4 @@
-import { typedArrayAt, typedArrayCopyWithin, typedArrayEntries, typedArrayEvery, typedArrayFill, typedArrayFilter, typedArrayFind, typedArrayFindIndex, typedArrayForEach, typedArrayIncludes, typedArrayIndexOf, typedArrayJoin, typedArrayKeys, typedArrayLastIndexOf, typedArrayMap, typedArrayReduce, typedArrayReduceRight, typedArrayReverse, typedArraySlice, typedArraySome, typedArraySort, typedArrayToLocaleString, typedArrayToString, typedArrayValues } from '../src/modules/_typed-array-impl.js';
+import { typedArrayAt, typedArrayCopyWithin, typedArrayEntries, typedArrayEvery, typedArrayFill, typedArrayFilter, typedArrayFind, typedArrayFindIndex, typedArrayForEach, typedArrayIncludes, typedArrayIndexOf, typedArrayJoin, typedArrayKeys, typedArrayLastIndexOf, typedArrayMap, typedArrayReduce, typedArrayReduceRight, typedArrayReverse, typedArraySlice, typedArraySome, typedArraySort, typedArrayToLocaleString, typedArrayToString, typedArrayValues } from '../src/modules/install-typed-array.js';
 
 
 describe('TypedArray.prototype.find — polyfill vs native', () => {

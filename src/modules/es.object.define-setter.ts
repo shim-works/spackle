@@ -1,7 +1,19 @@
-// Existence-only: __defineSetter__ is either present and correct or absent.
+// Captured at module eval, before install-polyfills can replace it.
+const nativeDefineSetter: any = (Object.prototype as any).__defineSetter__;
+
+// core-js's object-prototype-accessors-forced: a native __defineSetter__ must
+// throw on a null receiver (Chrome 41's defines on window instead).
 export const isSupported = (): boolean => {
   try {
-    return typeof (Object.prototype as any).__defineSetter__ === 'function';
+    if (typeof (Object.prototype as any).__defineSetter__ !== 'function' || typeof nativeDefineSetter !== 'function') return false;
+    const key = '__spackle_probe__' + Math.random();
+    try {
+      nativeDefineSetter.call(null, key, function () {});
+    } catch (e) {
+      return true;
+    }
+    delete (window as any)[key];
+    return false;
   } catch {
     return false;
   }

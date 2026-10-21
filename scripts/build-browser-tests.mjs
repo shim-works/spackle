@@ -32,7 +32,8 @@ const EXCLUDED = {
   // vi.resetModules() re-evaluates an ES module graph, which does not exist
   // once bundled; vi.spyOn is only used alongside it in these files
   'install.test.ts': 'vi.resetModules() has no meaning in a bundle',
-  'iterator-prototype-synthesis.test.ts': 'vi.resetModules() re-imports _iterator-impl',
+  'iterator-prototype-synthesis.test.ts': 'vi.resetModules() re-imports install-iterator',
+  'symbol-description-wrapper.test.ts': 'vi.resetModules() re-imports es.symbol',
   'set-immediate.test.ts': 'vi.useFakeTimers / module reset',
   'url-polyfill.test.ts': 'vi.spyOn on document.implementation',
   'rule-breaks.test.ts': 'vi.spyOn / vi.resetModules re-imports islands',

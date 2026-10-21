@@ -477,7 +477,7 @@ const defTag = (target: any, value: string): void => {
   });
 };
 
-export const install = (): void => {
+export const installDisposable = (): void => {
   if (tagKey) {
     defTag(DisposableStack.prototype, 'DisposableStack');
     defTag(AsyncDisposableStack.prototype, 'AsyncDisposableStack');
