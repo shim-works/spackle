@@ -159,6 +159,10 @@ describe('terminal operations', () => {
     expect(iteratorReduce.call(iterOf([1, 2, 3]), (a: number, b: number) => a + b, 10)).toBe(16);
   });
 
+  it('reduce has the spec length of 1', () => {
+    expect(iteratorReduce.length).toBe(1);
+  });
+
   it('reduce throws on an empty iterator with no initial value', () => {
     expect(() => iteratorReduce.call(iterOf([]), (a: any, b: any) => a + b)).toThrow(TypeError);
   });

@@ -2,13 +2,23 @@
 const unscopablesKey =
   typeof Symbol !== 'undefined' ? (Symbol as any).unscopables : undefined;
 
+// Every spec name. core-js's addToUnscopables runs in each method's module, so a
+// native table that lacks a newer name (Chrome 41 has no `at`) still gets it.
+// This island carries the whole list: it installs after every Array method.
+const NAMES = ['at', 'copyWithin', 'entries', 'fill', 'find', 'findIndex', 'findLast', 'findLastIndex',
+  'flat', 'flatMap', 'includes', 'keys', 'toReversed', 'toSorted', 'toSpliced', 'values'];
+
 export const isSupported = (): boolean => {
   try {
     if (!unscopablesKey) {
       return true;
     }
     const table = (Array.prototype as any)[unscopablesKey];
-    return !!table && table.flat === true;
+    if (!table || table.flat !== true) return false;
+    for (let i = 0; i < NAMES.length; i++) {
+      if (typeof (Array.prototype as any)[NAMES[i]] === 'function' && table[NAMES[i]] !== true) return false;
+    }
+    return true;
   } catch {
     return true;
   }
@@ -32,5 +42,9 @@ export const install = (): void => {
       });
     }
     table.flat = true;
+    // The rest only where the method exists, as core-js adds each with its method.
+    for (let i = 0; i < NAMES.length; i++) {
+      if (typeof (Array.prototype as any)[NAMES[i]] === 'function') table[NAMES[i]] = true;
+    }
   }
 };

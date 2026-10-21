@@ -9,6 +9,9 @@ export const isSupported = (): boolean => {
     if (typeof nativeUnshift !== 'function') return false;
     // INCORRECT_RESULT: unshift returns the new length
     if (([] as any).unshift(0) !== 1) return false;
+    // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads {length: 2^32}
+    // as 0; on a huge real length it would move ~2^32 elements
+    if ((nativeUnshift as any).call({ length: 4294967296 }) !== 4294967296) return false;
     // must throw TypeError on a non-writable length
     try {
       (Object.defineProperty([], 'length', { writable: false }) as any).unshift();
@@ -23,7 +26,8 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.unshift */
 
-export const arrayUnshift = function unshift(this: any): number {
+// Declared (item) only, for the spec length of 1; every argument comes from arguments.
+export const arrayUnshift = function unshift(this: any, _item?: any): number {
   // inlined: toObject(this)
   if (this === null || this === undefined) throw new TypeError('Cannot convert undefined or null to object');
   const O = Object(this);

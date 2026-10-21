@@ -130,13 +130,24 @@ const SetIterator = function (
   self: any,
   kind: 'values' | 'entries',
 ): void {
-  this._self = self;
-  this._index = 0;
-  this._kind = kind;
-  this._epoch = self._epoch;
+  // Slots stay non-enumerable, like the spec's: Object.keys(iterator) is [].
+  SLOT.value = self;
+  Object.defineProperty(this, '_self', SLOT);
+  SLOT.value = 0;
+  Object.defineProperty(this, '_index', SLOT);
+  SLOT.value = kind;
+  Object.defineProperty(this, '_kind', SLOT);
+  SLOT.value = self._epoch;
+  Object.defineProperty(this, '_epoch', SLOT);
+  SLOT.value = undefined; // never pin the last value
 } as any;
 
-SetIterator.prototype.next = function (this: any): any {
+const hasOwnSlot = Object.prototype.hasOwnProperty;
+
+SetIterator.prototype.next = function next(this: any): any {
+  if (this === null || typeof this !== 'object' || !hasOwnSlot.call(this, '_kind')) {
+    throw new TypeError('next method called on an object that is not a Set Iterator');
+  }
   const self = this._self;
   // already exhausted -- _self was released below, nothing left to read
   if (self === null) {
@@ -189,7 +200,22 @@ const own = (target: any, key: string, value: any): void => {
   }
 };
 
-export const Set = function (this: any, iterable?: any) {
+// Captured at load: the array fast path below is only taken while arrays still
+// iterate with this function, so a patched Array.prototype[@@iterator] is honoured.
+const arrayIterAtLoad: any = hasSymbol ? (Array.prototype as any)[(Symbol as any).iterator] : undefined;
+
+// IteratorClose after a per-item failure: a throw from return() itself must
+// not mask the original error.
+const closeIterator = (iterator: any): void => {
+  try {
+    const ret = iterator['return'];
+    if (ret !== undefined && ret !== null) ret.call(iterator);
+  } catch (e) {
+    /* the original error wins */
+  }
+};
+
+export const Set = function (this: any) {
   if (!(this instanceof Set)) {
     throw new TypeError("Constructor Set requires 'new'");
   }
@@ -199,32 +225,59 @@ export const Set = function (this: any, iterable?: any) {
   Object.defineProperty(this, '_values', SLOT);
   SLOT.value = undefined; // never pin the last value
 
+  const iterable = arguments.length > 0 ? arguments[0] : undefined;
   if (iterable === null || iterable === undefined) {
     return;
   }
+  // Get(set, "add") happens for every iterable, even an empty one
+  const adder = this.add;
+  if (typeof adder !== 'function') {
+    throw new TypeError('Set constructor: this.add is not a function');
+  }
 
-  // Consume an array directly, otherwise any Symbol.iterator iterable.
-  if (Array.isArray(iterable)) {
+  // A genuine array with untouched iteration: walk it directly (an array
+  // iterator has no return(), so nothing to close). Engines without Symbol get
+  // this path for arrays too, since nothing else is iterable there.
+  if (Array.isArray(iterable) && (!hasSymbol || (iterable[(Symbol as any).iterator] === arrayIterAtLoad && (Array.prototype as any)[(Symbol as any).iterator] === arrayIterAtLoad))) {
     for (let i = 0; i < iterable.length; i++) {
-      this.add(iterable[i]);
+      const item = iterable[i];
+      adder.call(this, item);
     }
     return;
   }
 
-  if (hasSymbol && typeof iterable[(Symbol as any).iterator] === 'function') {
-    const it = iterable[(Symbol as any).iterator]();
-    let step = it.next();
-    while (!step.done) {
-      this.add(step.value);
-      step = it.next();
-    }
-    return;
+  const method = hasSymbol ? iterable[(Symbol as any).iterator] : undefined;
+  if (typeof method !== 'function') {
+    throw new TypeError('Set constructor argument is not iterable');
   }
-
-  throw new TypeError('Set constructor argument is not iterable');
+  const iterator = method.call(iterable);
+  if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) {
+    throw new TypeError('Result of the Symbol.iterator method is not an object');
+  }
+  // GetIteratorDirect reads next once; errors from next/done/value never close
+  const next = iterator.next;
+  for (;;) {
+    const step = next.call(iterator);
+    if (step === null || (typeof step !== 'object' && typeof step !== 'function')) {
+      throw new TypeError('Iterator result is not an object');
+    }
+    if (step.done) {
+      return;
+    }
+    const item = step.value;
+    try {
+      adder.call(this, item);
+    } catch (error) {
+      closeIterator(iterator);
+      throw error;
+    }
+  }
 } as any;
 
 Set.prototype.add = function (this: any, value: any): any {
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.add called on incompatible receiver');
+  }
   // Normalise -0 to +0 so iteration never surfaces -0 (SameValueZero value).
   if (value === 0) {
     value = 0;
@@ -259,6 +312,9 @@ Set.prototype.add = function (this: any, value: any): any {
 };
 
 Set.prototype.has = function (this: any, value: any): boolean {
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.has called on incompatible receiver');
+  }
   // inlined: indexOf(this, value) -- dictionary once big, else scan
   let i = -1;
   if (this._si !== 0 && (typeof value === 'string' || typeof value === 'number')) {
@@ -279,6 +335,9 @@ Set.prototype.has = function (this: any, value: any): boolean {
 };
 
 Set.prototype.delete = function (this: any, value: any): boolean {
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.delete called on incompatible receiver');
+  }
   // inlined: indexOf(this, value) -- dictionary once big, else scan
   let i = -1;
   if (this._si !== 0 && (typeof value === 'string' || typeof value === 'number')) {
@@ -311,17 +370,21 @@ Set.prototype.delete = function (this: any, value: any): boolean {
 };
 
 Set.prototype.clear = function (this: any): void {
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.clear called on incompatible receiver');
+  }
   // spec: every element becomes ~empty~; the epoch restart lets a paused
   // iterator see exactly what is added afterwards
   own(this, '_holes', this._values.length);
   compact(this);
 };
 
-Set.prototype.forEach = function (
-  this: any,
-  callback: (value: any, value2: any, set: any) => void,
-  thisArg?: any,
-): void {
+// Declared (callbackfn) for the spec length of 1; thisArg comes from arguments.
+Set.prototype.forEach = function (this: any, callback: any): void {
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.forEach called on incompatible receiver');
+  }
   if (typeof callback !== 'function') {
     throw new TypeError('Set.prototype.forEach callback is not a function');
   }
@@ -352,6 +415,9 @@ Set.prototype.forEach = function (
 };
 
 Set.prototype.values = function (this: any): any {
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.values called on incompatible receiver');
+  }
   return new SetIterator(this, 'values');
 };
 
@@ -359,12 +425,18 @@ Set.prototype.values = function (this: any): any {
 Set.prototype.keys = Set.prototype.values;
 
 Set.prototype.entries = function (this: any): any {
+  if (this === null || typeof this !== 'object' || this._values === undefined) {
+    throw new TypeError('Method Set.prototype.entries called on incompatible receiver');
+  }
   return new SetIterator(this, 'entries');
 };
 
 Object.defineProperty(Set.prototype, 'size', {
   configurable: true,
   get(this: any): number {
+    if (this === null || typeof this !== 'object' || this._values === undefined) {
+      throw new TypeError('get Set.prototype.size called on incompatible receiver');
+    }
     return this._values.length - this._holes;
   },
 });
@@ -384,6 +456,36 @@ if (hasSymbol) {
   if ((Symbol as any).toStringTag) {
     Object.defineProperty(Set.prototype, (Symbol as any).toStringTag, { value: 'Set', writable: false, enumerable: false, configurable: true });
   }
+}
+
+// Methods non-enumerable, writable and configurable like the natives', with
+// their spec names (assigned function expressions are anonymous).
+const setMethods: any[] = [['add', 1], ['has', 1], ['delete', 1], ['clear', 0], ['forEach', 1], ['values', 0], ['entries', 0]];
+for (let i = 0; i < setMethods.length; i++) {
+  const name = setMethods[i][0];
+  const fn = (Set.prototype as any)[name];
+  try {
+    Object.defineProperty(fn, 'name', { value: name, configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(Set.prototype, name, { value: fn, writable: true, enumerable: false, configurable: true });
+}
+Object.defineProperty(Set.prototype, 'keys', { value: Set.prototype.values, writable: true, enumerable: false, configurable: true });
+try {
+  Object.defineProperty(SetIterator.prototype.next, 'name', { value: 'next', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+Object.defineProperty(SetIterator.prototype, 'next', { value: SetIterator.prototype.next, writable: true, enumerable: false, configurable: true });
+// Set[@@species]: a getter returning this
+if (typeof Symbol !== 'undefined' && (Symbol as any).species) {
+  const speciesGetter = function (this: any) {
+    return this;
+  };
+  try {
+    Object.defineProperty(speciesGetter, 'name', { value: 'get [Symbol.species]', configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(Set, (Symbol as any).species, { get: speciesGetter, enumerable: false, configurable: true });
+}
+if (hasSymbol && (Symbol as any).toStringTag) {
+  Object.defineProperty(SetIterator.prototype, (Symbol as any).toStringTag, { value: 'Set Iterator', writable: false, enumerable: false, configurable: true });
 }
 
 export const install = (): void => {

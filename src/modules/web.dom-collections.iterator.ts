@@ -74,79 +74,51 @@ export const domCollectionEntries = function (this: any) {
   return iterator;
 };
 
-const patchCollection = (proto: any): void => {
-  if (!proto.keys) {
-    Object.defineProperty(proto, "keys", {
-      value: domCollectionKeys,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-    try {
-      Object.defineProperty(proto.keys, "name", {
-        value: "keys",
-        configurable: true,
-      });
-    } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-    Object.defineProperty(proto.keys as any, "__polyfilled", { value: true });
+/*
+ * WebIDL: on an interface with indexed properties, keys/values/entries are the
+ * %Array.prototype% functions themselves (enumerable operations) and @@iterator
+ * is %Array.prototype.values% (non-enumerable). They are natives (or es.array's,
+ * installed first), so they are neither renamed nor marked here. The collection
+ * iterator above only serves engines with no Array iterators at all.
+ */
+const own: [string, any][] = [
+  ['keys', domCollectionKeys],
+  ['values', domCollectionValues],
+  ['entries', domCollectionEntries],
+];
+const patchCollection = (proto: any, withMethods: boolean): void => {
+  if (withMethods) {
+    for (let i = 0; i < own.length; i++) {
+      const name = own[i][0];
+      const arrayFn = (Array.prototype as any)[name];
+      // keep a present one unless spackle replaced the Array function it should equal
+      if (proto[name] && !(arrayFn && arrayFn.__polyfilled === true && proto[name] !== arrayFn)) continue;
+      if (typeof arrayFn === 'function') {
+        Object.defineProperty(proto, name, { value: arrayFn, writable: true, enumerable: true, configurable: true });
+      } else {
+        Object.defineProperty(proto, name, { value: own[i][1], writable: true, enumerable: true, configurable: true });
+        try {
+          Object.defineProperty(own[i][1], 'name', { value: name, configurable: true });
+        } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
+        Object.defineProperty(own[i][1], '__polyfilled', { value: true });
+      }
+    }
   }
-  if (!proto.values) {
-    Object.defineProperty(proto, "values", {
-      value: domCollectionValues,
+  const iteratorKey = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+  const arrayValues = (Array.prototype as any).values;
+  if (iteratorKey && (!proto[iteratorKey] || (arrayValues && arrayValues.__polyfilled === true && proto[iteratorKey] !== arrayValues))) {
+    Object.defineProperty(proto, iteratorKey, {
+      value: typeof arrayValues === 'function' ? arrayValues : (proto.values || domCollectionValues),
       writable: true,
       enumerable: false,
       configurable: true,
     });
-    try {
-      Object.defineProperty(proto.values, "name", {
-        value: "values",
-        configurable: true,
-      });
-    } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-    Object.defineProperty(proto.values as any, "__polyfilled", { value: true });
-  }
-  if (!proto.entries) {
-    Object.defineProperty(proto, "entries", {
-      value: domCollectionEntries,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-    try {
-      Object.defineProperty(proto.entries, "name", {
-        value: "entries",
-        configurable: true,
-      });
-    } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-    Object.defineProperty(proto.entries as any, "__polyfilled", {
-      value: true,
-    });
-  }
-  if (
-    typeof Symbol !== "undefined" &&
-    (Symbol as any).iterator &&
-    !proto[(Symbol as any).iterator]
-  ) {
-    Object.defineProperty(proto, (Symbol as any).iterator, {
-      value: proto.values,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-    Object.defineProperty(
-      proto[(Symbol as any).iterator] as any,
-      "__polyfilled",
-      { value: true },
-    );
   }
 };
 
 export const install = (): void => {
-  if (typeof NodeList !== "undefined") {
-    patchCollection(NodeList.prototype);
-  }
-  if (typeof DOMTokenList !== "undefined") {
-    patchCollection(DOMTokenList.prototype);
-  }
+  if (typeof NodeList !== 'undefined') patchCollection(NodeList.prototype, true);
+  if (typeof DOMTokenList !== 'undefined') patchCollection(DOMTokenList.prototype, true);
+  // HTMLCollection is iterable (@@iterator) but has no keys/values/entries/forEach
+  if (typeof HTMLCollection !== 'undefined') patchCollection(HTMLCollection.prototype, false);
 };
-

@@ -271,6 +271,8 @@ def(AsyncDisposableStack.prototype, 'use', function (this: any, value: any): any
   // inlined: assertLive(this, 'use')
   if ((this as any)._disposed) throw new ReferenceError('DisposableStack already disposed: use');
   if (value === null || value === undefined) {
+    // recorded with no method: disposeAsync owes it one Await (explicit-await-for-null)
+    this._stack.push(null);
     return value;
   }
   const boxed = Object(value);
@@ -296,7 +298,14 @@ def(AsyncDisposableStack.prototype, 'use', function (this: any, value: any): any
         syncMethod = found;
       }
     }
-    method = syncMethod;
+    if (syncMethod !== undefined) {
+      // the spec's closure around a sync @@dispose: call it, discard its result
+      this._stack.push(function () {
+        syncMethod.call(value);
+        return undefined;
+      });
+      return value;
+    }
   }
   if (method === undefined) {
     throw new TypeError('value is not async disposable');
@@ -353,12 +362,12 @@ def(AsyncDisposableStack.prototype, 'move', function (this: any): any {
 });
 
 def(AsyncDisposableStack.prototype, 'disposeAsync', function (this: any): any {
-  // inlined: assertBrand(this, 'AsyncDisposableStack', 'disposeAsync')
-  if (this === null || typeof this !== 'object' || (this as any)._brand !== 'AsyncDisposableStack') {
-    throw new TypeError('AsyncDisposableStack.prototype.disposeAsync called on incompatible receiver');
-  }
   if (typeof Promise === 'undefined') {
     throw new TypeError('AsyncDisposableStack requires Promise');
+  }
+  // A bad receiver rejects the returned promise; it never throws synchronously.
+  if (this === null || typeof this !== 'object' || (this as any)._brand !== 'AsyncDisposableStack') {
+    return Promise.reject(new TypeError('AsyncDisposableStack.prototype.disposeAsync called on incompatible receiver'));
   }
   if (this._disposed) {
     return Promise.resolve(undefined);
@@ -366,29 +375,59 @@ def(AsyncDisposableStack.prototype, 'disposeAsync', function (this: any): any {
   this._disposed = true;
   const pending = this._stack;
   this._stack = [];
-  let index = pending.length - 1;
-  let hasError = false;
-  let error: any;
-  // Explicit promise chain rather than async/await: awaiting each disposer in
-  // turn is required (they must not run concurrently), and this keeps the
-  // module free of downlevel async helpers.
-  const step = function (): any {
-    if (index < 0) {
-      if (hasError) throw error;
-      return undefined;
-    }
-    const disposer = pending[index--];
-    return Promise.resolve()
-      .then(function () {
-        return disposer();
-      })
-      .then(undefined, function (thrown: any) {
-        error = suppress(error, hasError, thrown);
-        hasError = true;
-      })
-      .then(step);
-  };
-  return Promise.resolve().then(step);
+  /*
+   * DisposeResources, last added first. Each disposer runs synchronously up to
+   * its own Await, so an empty stack settles with no extra tick; a resource
+   * recorded without a method (use(null)) only owes one Await at the end, and
+   * only if nothing else awaited.
+   */
+  return new Promise(function (resolve: any, reject: any) {
+    let index = pending.length - 1;
+    let hasError = false;
+    let error: any;
+    let needsAwait = false;
+    let hasAwaited = false;
+    const finish = function (): void {
+      if (hasError) reject(error);
+      else resolve(undefined);
+    };
+    const record = function (thrown: any): void {
+      error = suppress(error, hasError, thrown);
+      hasError = true;
+    };
+    const loop = function (): void {
+      while (index >= 0) {
+        const disposer = pending[index];
+        pending[index--] = null; // a disposed resource pins nothing
+        if (disposer === null) {
+          needsAwait = true;
+          continue;
+        }
+        let result: any;
+        try {
+          result = disposer();
+        } catch (thrown) {
+          record(thrown);
+          continue;
+        }
+        // Await(result): resume the loop once it settles
+        hasAwaited = true;
+        Promise.resolve(result).then(loop, function (thrown: any) {
+          record(thrown);
+          loop();
+        });
+        return;
+      }
+      if (needsAwait && !hasAwaited) {
+        needsAwait = false;
+        hasAwaited = true;
+        Promise.resolve(undefined).then(finish);
+        return;
+      }
+      finish();
+    };
+    loop();
+  });
 });
 
 // SuppressedError's constructor inherits from Error. Inline setPrototypeOf

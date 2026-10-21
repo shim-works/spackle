@@ -20,9 +20,37 @@ const returnSelf = function (this: any) {
 
 // One shared prototype, so _iterator-impl's splice has something to hang the
 // helpers off (never Object.prototype), and no closures per iterator.
-const ArrayIteratorPrototype: any = {};
+// It inherits %IteratorPrototype% when a built-in iterator can lead us to it
+// (the iterator island also splices it at install, for engines where none can).
+const findIteratorPrototype = (): any => {
+  const key = typeof Symbol !== "undefined" ? (Symbol as any).iterator : undefined;
+  if (!key) return Object.prototype;
+  const g: any = typeof window !== "undefined" ? window : globalThis;
+  const samples: Array<() => any> = [
+    function () { return ("" as any)[key](); },
+    function () { return new g.Map()[key](); },
+    function () { return new g.Set()[key](); },
+  ];
+  for (let i = 0; i < samples.length; i++) {
+    try {
+      const proto = Object.getPrototypeOf(Object.getPrototypeOf(samples[i]()));
+      if (proto && proto !== Object.prototype) return proto;
+    } catch (e) {
+      /* missing or unusable -- try the next */
+    }
+  }
+  return Object.prototype;
+};
+const ArrayIteratorPrototype: any = Object.create(findIteratorPrototype());
 
-ArrayIteratorPrototype.next = function (this: any): any {
+const hasOwn = Object.prototype.hasOwnProperty;
+
+// %ArrayIteratorPrototype%.next. The brand check is an own _kind slot: an object
+// that merely inherits from an iterator is not one.
+const arrayIteratorNext = function next(this: any): any {
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_kind')) {
+    throw new TypeError('next method called on an object that is not an Array Iterator');
+  }
   const object = this._object;
   // already exhausted -- _object was released below, nothing left to read
   if (object === null) {
@@ -49,6 +77,39 @@ ArrayIteratorPrototype.next = function (this: any): any {
   return { value: [index, object[index]], done: false };
 };
 
+try {
+  Object.defineProperty(arrayIteratorNext, 'name', { value: 'next', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+Object.defineProperty(ArrayIteratorPrototype, 'next', {
+  value: arrayIteratorNext,
+  writable: true,
+  enumerable: false,
+  configurable: true,
+});
+if (typeof Symbol !== "undefined" && (Symbol as any).toStringTag) {
+  Object.defineProperty(ArrayIteratorPrototype, (Symbol as any).toStringTag, {
+    value: "Array Iterator",
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
+}
+
+// Internal slots stay non-enumerable, like the spec's: Object.keys(iterator) is [].
+// One reused descriptor; its value is cleared after each use.
+const slotDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: false };
+const makeIterator = (object: any, kind: string): any => {
+  const iterator: any = Object.create(ArrayIteratorPrototype);
+  slotDesc.value = object;
+  Object.defineProperty(iterator, '_object', slotDesc);
+  slotDesc.value = 0;
+  Object.defineProperty(iterator, '_index', slotDesc);
+  slotDesc.value = kind;
+  Object.defineProperty(iterator, '_kind', slotDesc);
+  slotDesc.value = undefined;
+  return iterator;
+};
+
 // self-iterable so for..of / spread work when Symbols exist
 if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
   Object.defineProperty(ArrayIteratorPrototype, (Symbol as any).iterator, {
@@ -64,12 +125,7 @@ export const arrayKeys = function (this: any): any {
   if (this === null || this === undefined) {
     throw new TypeError("Array.prototype.keys called on null or undefined");
   }
-  // inlined: makeArrayIterator(Object(this), "keys")
-  const iterator: any = Object.create(ArrayIteratorPrototype);
-  iterator._object = Object(this);
-  iterator._index = 0;
-  iterator._kind = "keys";
-  return iterator;
+  return makeIterator(Object(this), "keys");
 };
 
 export const arrayValues = function (this: any): any {
@@ -77,12 +133,7 @@ export const arrayValues = function (this: any): any {
   if (this === null || this === undefined) {
     throw new TypeError("Array.prototype.values called on null or undefined");
   }
-  // inlined: makeArrayIterator(Object(this), "values")
-  const iterator: any = Object.create(ArrayIteratorPrototype);
-  iterator._object = Object(this);
-  iterator._index = 0;
-  iterator._kind = "values";
-  return iterator;
+  return makeIterator(Object(this), "values");
 };
 
 export const arrayEntries = function (this: any): any {
@@ -90,15 +141,12 @@ export const arrayEntries = function (this: any): any {
   if (this === null || this === undefined) {
     throw new TypeError("Array.prototype.entries called on null or undefined");
   }
-  // inlined: makeArrayIterator(Object(this), "entries")
-  const iterator: any = Object.create(ArrayIteratorPrototype);
-  iterator._object = Object(this);
-  iterator._index = 0;
-  iterator._kind = "entries";
-  return iterator;
+  return makeIterator(Object(this), "entries");
 };
 
 export const install = (): void => {
+  const iteratorKey = typeof Symbol !== "undefined" ? (Symbol as any).iterator : undefined;
+  const nativeIterator: any = iteratorKey ? (Array.prototype as any)[iteratorKey] : undefined;
   if (typeof Array.prototype.keys !== "function") {
     Object.defineProperty(Array.prototype, "keys", {
       value: arrayKeys as any,
@@ -117,21 +165,49 @@ export const install = (): void => {
     });
   }
   if (typeof Array.prototype.values !== "function") {
-    Object.defineProperty(Array.prototype, "values", {
-      value: arrayValues as any,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-    try {
-      Object.defineProperty(Array.prototype.values, "name", {
-        value: "values",
+    if (typeof nativeIterator === "function") {
+      // core-js's iterator-define: values is the native @@iterator, so both hand
+      // out the engine's own %ArrayIteratorPrototype%. Its name can't be changed
+      // on Chrome < 43, so where it isn't 'values', both get a named wrapper.
+      // Not `const values`: esbuild would rename the inner function to values2.
+      const valuesMethod =
+        nativeIterator.name === "values"
+          ? nativeIterator
+          : function values(this: any) {
+              return nativeIterator.call(this);
+            };
+      Object.defineProperty(Array.prototype, "values", {
+        value: valuesMethod,
+        writable: true,
+        enumerable: false,
         configurable: true,
       });
-    } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-    Object.defineProperty(Array.prototype.values as any, "__polyfilled", {
-      value: true,
-    });
+      if (valuesMethod !== nativeIterator) {
+        Object.defineProperty(valuesMethod, "__polyfilled", { value: true });
+        Object.defineProperty(Array.prototype, iteratorKey, {
+          value: valuesMethod,
+          writable: true,
+          enumerable: false,
+          configurable: true,
+        });
+      }
+    } else {
+      Object.defineProperty(Array.prototype, "values", {
+        value: arrayValues as any,
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
+      try {
+        Object.defineProperty(Array.prototype.values, "name", {
+          value: "values",
+          configurable: true,
+        });
+      } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
+      Object.defineProperty(Array.prototype.values as any, "__polyfilled", {
+        value: true,
+      });
+    }
   }
   if (typeof Array.prototype.entries !== "function") {
     Object.defineProperty(Array.prototype, "entries", {
@@ -162,5 +238,18 @@ export const install = (): void => {
       enumerable: false,
       configurable: true,
     });
+  }
+  // core-js's setToStringTag on the native %ArrayIteratorPrototype%.
+  const tag = typeof Symbol !== "undefined" ? (Symbol as any).toStringTag : undefined;
+  if (tag && typeof nativeIterator === "function") {
+    const proto = Object.getPrototypeOf(nativeIterator.call([]));
+    if (proto !== Object.prototype && !Object.prototype.hasOwnProperty.call(proto, tag)) {
+      Object.defineProperty(proto, tag, {
+        value: "Array Iterator",
+        writable: false,
+        enumerable: false,
+        configurable: true,
+      });
+    }
   }
 };

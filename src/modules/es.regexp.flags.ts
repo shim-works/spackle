@@ -20,40 +20,20 @@ export const isSupported = (): boolean => {
 /**
  * Spec: https://tc39.es/ecma262/#sec-get-regexp.prototype.flags
  *
- * Each flag is read without re-entering a polyfill that derives from this getter
- * (flags -> dotAll -> flags recurses where both are polyfilled). Own properties
- * win; otherwise ask a native accessor on the prototype, and treat ours as false.
+ * Reads each flag property with Get, in spec order. es.regexp.dot-all's getter
+ * never reads `flags`, so the flags -> dotAll -> flags cycle cannot happen.
  */
-// Annex B __lookupGetter__ (Chrome 38, Safari 7.1): returns the getter with no
-// descriptor per read, and can't throw on RegExp.prototype.
-const lookupGetter = (Object.prototype as any).__lookupGetter__;
-const hasOwn = Object.prototype.hasOwnProperty;
-const RegExpProto = RegExp.prototype;
 // spec order: d g i m s u v y
 const FLAG_KEYS = ['hasIndices', 'global', 'ignoreCase', 'multiline', 'dotAll', 'unicode', 'unicodeSets', 'sticky'];
 const FLAG_CHARS = 'dgimsuvy';
 
 export const regExpFlags = function (this: any): string {
-  if (this === null || typeof this !== 'object') {
+  if (this === null || (typeof this !== 'object' && typeof this !== 'function')) {
     throw new TypeError('RegExp.prototype.flags getter called on a non-object');
   }
   let result = '';
   for (let i = 0; i < FLAG_KEYS.length; i++) {
-    const key = FLAG_KEYS[i];
-    // inlined: readFlag(this, key)
-    let on: boolean;
-    if (hasOwn.call(this, key)) {
-      on = !!this[key];
-    } else {
-      // Not re-checked from a cache on purpose: `flags` can run mid-install,
-      // before the polyfilled flag getters exist, and a stale answer would
-      // bring the flags -> dotAll -> flags cycle back.
-      const getter = lookupGetter
-        ? lookupGetter.call(RegExpProto, key)
-        : (Object.getOwnPropertyDescriptor(RegExpProto, key) || ({} as any)).get;
-      on = getter && getter.__polyfilled ? false : !!this[key];
-    }
-    if (on) result += FLAG_CHARS.charAt(i);
+    if (this[FLAG_KEYS[i]]) result += FLAG_CHARS.charAt(i);
   }
   return result;
 };

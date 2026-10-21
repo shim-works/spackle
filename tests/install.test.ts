@@ -143,7 +143,8 @@ describe('accessor / symbol-keyed function names (from test262)', () => {
       installPolyfills();
       expect((Date.prototype as any)[Symbol.toPrimitive].name).toBe('[Symbol.toPrimitive]');
     } finally {
-      (Date.prototype as any)[Symbol.toPrimitive] = native;
+      // non-writable per spec, so restore by redefining, not assigning
+      Object.defineProperty(Date.prototype, Symbol.toPrimitive, { value: native, writable: false, enumerable: false, configurable: true });
     }
   });
 

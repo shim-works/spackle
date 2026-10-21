@@ -6,99 +6,157 @@ export const isSupported = (): boolean => {
   }
 };
 
-/**
- * Spec: https://tc39.es/ecma262/#sec-promise.any
- *
- * Known limitations:
- * - [incomplete] Accepts arrays, array-likes, and forEach-bearing iterables;
- *   generic Symbol.iterator-only iterables are not supported on the ES5 baseline.
+/** Spec: https://tc39.es/ecma262/#sec-promise.any */
+
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+const hasOwn = Object.prototype.hasOwnProperty;
+// IsConstructor, best ES5 approximation: ordinary and built-in constructors carry
+// an own prototype; bound functions are constructors without one.
+const isConstructor = (C: any): boolean =>
+  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
+
+/*
+ * Built-in closures (resolve element functions, capability wrappers) are not
+ * constructors and have no prototype. ES5 function expressions always are, so
+ * where the engine parses arrows, wrap in one (length 1, name '').
  */
+let arrowWrap: any = null;
+try {
+  arrowWrap = new Function('f', 'return (x) => f(x)');
+} catch (e) {
+  /* no arrow syntax (or CSP): plain functions, the ES5 best */
+}
+const builtinClosure = (fn: (x: any) => any): any =>
+  arrowWrap ? arrowWrap(fn) : function (x: any) { return fn(x); };
 
-// once-flag for the generic-iterable warn below
-let warnedGenericIterable = false;
+// NewPromiseCapability(C), with GetCapabilitiesExecutor's checks.
+const newPromiseCapability = (C: any): any => {
+  if (!isConstructor(C)) throw new TypeError('Promise capability: not a constructor');
+  const capability: any = { promise: undefined, resolve: undefined, reject: undefined };
+  const executor = function (resolve: any, reject: any): void {
+    if (capability.resolve !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
+    if (capability.reject !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
+    capability.resolve = resolve;
+    capability.reject = reject;
+  };
+  capability.promise = new C(executor);
+  if (typeof capability.resolve !== 'function') throw new TypeError('Promise resolve function is not callable');
+  if (typeof capability.reject !== 'function') throw new TypeError('Promise reject function is not callable');
+  return capability;
+};
 
-const makeAggregateError = (errors: any[], message: string): any => {
-  // AggregateError ships alongside Promise.any (Chrome 85): an engine reaching the
-  // fallback lacks both.
-  if (typeof AggregateError !== 'undefined') {
-    return new AggregateError(errors, message);
+// IteratorClose after an abrupt step on our side; the original error wins.
+const closeIterator = (iterator: any): void => {
+  try {
+    const ret = iterator['return'];
+    if (ret !== undefined && ret !== null) ret.call(iterator);
+  } catch (e) {
+    /* the original error wins */
   }
-  const err: any = new Error(message);
-  err.name = 'AggregateError';
-  err.errors = errors;
+};
+
+// One description per combinator call: an iterator and its next, or (engines
+// without Symbol, where nothing else is iterable) an array-like walked by index.
+const getIteratorRecord = (iterable: any): any => {
+  const key = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+  if (key) {
+    if (iterable === null || iterable === undefined) throw new TypeError('object is not iterable');
+    const method = iterable[key];
+    if (typeof method !== 'function') throw new TypeError('object is not iterable');
+    const iterator = method.call(iterable);
+    if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+    return { iterator: iterator, next: iterator.next, arrayLike: null, index: 0, done: false };
+  }
+  if (iterable === null || iterable === undefined || typeof iterable.length !== 'number') {
+    throw new TypeError('object is not iterable');
+  }
+  return { iterator: null, next: null, arrayLike: iterable, index: 0, done: false };
+};
+
+// IteratorStepValue: returns DONE at the end; protocol errors mark the record
+// done (so it is not closed) and propagate.
+const DONE = {};
+const stepValue = (record: any): any => {
+  if (record.arrayLike !== null) {
+    if (record.index >= record.arrayLike.length) {
+      record.done = true;
+      return DONE;
+    }
+    return record.arrayLike[record.index++];
+  }
+  try {
+    const result = record.next.call(record.iterator);
+    if (!isObject(result)) throw new TypeError('Iterator result is not an object');
+    if (result.done) {
+      record.done = true;
+      return DONE;
+    }
+    return result.value;
+  } catch (error) {
+    record.done = true;
+    throw error;
+  }
+};
+
+// One descriptor for CreateArrayFromList, reused; cleared after each list.
+const LIST: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+const arrayFromList = (list: any, length: number): any[] => {
+  const out: any[] = [];
+  for (let i = 0; i < length; i++) {
+    LIST.value = list[i];
+    Object.defineProperty(out, i, LIST);
+  }
+  LIST.value = undefined;
+  return out;
+};
+
+// %AggregateError%: the live one (native, or spackle's, which installs with
+// this); a bare Error with the same shape only where neither exists.
+const makeAggregateError = (errors: any[]): any => {
+  const Ctor = (window as any).AggregateError;
+  if (typeof Ctor === 'function') return new Ctor(errors, 'All promises were rejected');
+  const err: any = new Error('All promises were rejected');
+  Object.defineProperty(err, 'name', { value: 'AggregateError', writable: true, enumerable: false, configurable: true });
+  Object.defineProperty(err, 'errors', { value: errors, writable: true, enumerable: false, configurable: true });
   return err;
 };
 
-const collect = (
-  PromiseCtor: PromiseConstructor,
-  item: any,
-  index: number,
-  errors: any[],
-  resolve: (value: any) => void,
-  done: () => void
-): void => {
-  PromiseCtor.resolve(item).then(
-    function (value: any) {
-      resolve(value);
-    },
-    function (reason: any) {
-      errors[index] = reason;
-      done();
-    }
-  );
-};
-
-export const promiseAny = function (this: any, iterable: any) {
-  // native-first via species: use the constructor we're called on (Promise, or
-  // a subclass); fall back to the global Promise, which is native when present
-  let PromiseCtor: PromiseConstructor = Promise as PromiseConstructor;
-  if (typeof this === 'function') {
-    PromiseCtor = this;
-  }
-  return new PromiseCtor(function (resolve: any, reject: any) {
-    if (iterable == null) {
-      reject(
-        new TypeError(
-          'Promise.any requires an array-like or iterable argument'
-        )
-      );
-      return;
-    }
-// inlined: toArray(iterable) -- arrays, array-likes, and forEach-bearing iterables
-    const items: any[] = [];
-    // inlined: isArrayLike(iterable) -- takes the cheap index loop
-    if (typeof iterable !== 'function' && typeof iterable.length === 'number') {
-      for (let i = 0; i < iterable.length; i++) {
-        items[items.length] = iterable[i];
+export const promiseAny = function any(this: any, iterable: any) {
+  const C = this;
+  const capability = newPromiseCapability(C);
+  let record: any = null;
+  try {
+    const promiseResolve = C.resolve;
+    if (typeof promiseResolve !== 'function') throw new TypeError('Promise resolve is not callable');
+    record = getIteratorRecord(iterable);
+    const errors: any = Object.create(null);
+    let count = 0;
+    let remaining = 1;
+    for (;;) {
+      const value = stepValue(record);
+      if (value === DONE) {
+        if (--remaining === 0) capability.reject(makeAggregateError(arrayFromList(errors, count)));
+        return capability.promise;
       }
-    } else if (typeof iterable.forEach === 'function') {
-      iterable.forEach(function (value: any) {
-        items[items.length] = value;
+      const index = count++;
+      errors[index] = undefined;
+      const nextPromise = promiseResolve.call(C, value);
+      let alreadyCalled = false;
+      const onRejected = builtinClosure(function (x: any) {
+        if (alreadyCalled) return undefined;
+        alreadyCalled = true;
+        errors[index] = x;
+        if (--remaining === 0) return capability.reject(makeAggregateError(arrayFromList(errors, count)));
+        return undefined;
       });
-    } else if (!warnedGenericIterable) {
-      // the [incomplete] gap from the header, hit at runtime — say so
-      warnedGenericIterable = true;
-      console.warn(
-        '[spackle] Promise.any: generic iterables are not implemented — only arrays, array-likes and forEach-bearing collections; treating as empty'
-      );
+      remaining++;
+      // the capability's own resolve is the fulfilment reaction
+      nextPromise.then(capability.resolve, onRejected);
     }
-    const total = items.length;
-    const errors = new Array(total);
-    let remaining = total;
-    // no inputs at all → nothing can succeed, so reject right away
-    if (remaining === 0) {
-      reject(makeAggregateError(errors, 'All promises were rejected'));
-      return;
-    }
-    // first success wins; if the last one fails, we reject with everything
-    for (let i = 0; i < total; i++) {
-      collect(PromiseCtor, items[i], i, errors, resolve, function () {
-        remaining--;
-        if (remaining === 0) {
-          reject(makeAggregateError(errors, 'All promises were rejected'));
-        }
-      });
-    }
-  });
+  } catch (error) {
+    if (record !== null && !record.done && record.iterator !== null) closeIterator(record.iterator);
+    capability.reject(error);
+    return capability.promise;
+  }
 };
-

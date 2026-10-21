@@ -7,7 +7,7 @@ import { promiseAny } from '../src/modules/es.promise.any.js';
  */
 describe('Promise.any — test262 conformance', () => {
   it('resolves with the first fulfilment', async () => {
-    const out = await promiseAny([
+    const out = await promiseAny.call(Promise, [
       Promise.reject('nope'),
       Promise.resolve('win'),
       Promise.resolve('late'),
@@ -16,14 +16,14 @@ describe('Promise.any — test262 conformance', () => {
   });
 
   it('treats a non-promise value as an immediate fulfilment', async () => {
-    const out = await promiseAny([Promise.reject('x'), 'plain']);
+    const out = await promiseAny.call(Promise, [Promise.reject('x'), 'plain']);
     expect(out).toBe('plain');
   });
 
   it('rejects with an AggregateError when all inputs reject', async () => {
     let caught: any;
     try {
-      await promiseAny([Promise.reject('a'), Promise.reject('b')]);
+      await promiseAny.call(Promise, [Promise.reject('a'), Promise.reject('b')]);
     } catch (e) {
       caught = e;
     }
@@ -35,7 +35,7 @@ describe('Promise.any — test262 conformance', () => {
   it('rejects with an AggregateError (no errors) for empty input', async () => {
     let caught: any;
     try {
-      await promiseAny([]);
+      await promiseAny.call(Promise, []);
     } catch (e) {
       caught = e;
     }
@@ -46,7 +46,7 @@ describe('Promise.any — test262 conformance', () => {
   it('preserves rejection-reason order in AggregateError.errors', async () => {
     let caught: any;
     try {
-      await promiseAny([
+      await promiseAny.call(Promise, [
         Promise.reject('first'),
         Promise.reject('second'),
         Promise.reject('third'),
@@ -60,7 +60,7 @@ describe('Promise.any — test262 conformance', () => {
   it('matches native Promise.any for a fulfilling input', async () => {
     const input = () => [Promise.reject(0), Promise.resolve('ok')];
     const nativeOut = await Promise.any(input());
-    const polyOut = await promiseAny(input());
+    const polyOut = await promiseAny.call(Promise, input());
     expect(polyOut).toBe(nativeOut);
   });
 });

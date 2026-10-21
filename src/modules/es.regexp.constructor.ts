@@ -1,4 +1,5 @@
 // ids: es.regexp.constructor, es.regexp.exec, es.regexp.sticky
+import { define } from '../define.js';
 
 // RegExp sticky — behavioral: Chrome <49 / Safari <10 throw SyntaxError on the
 // 'y' flag, so we construct one and check it actually anchors at lastIndex.
@@ -97,21 +98,79 @@ const makeStickyInstance = (source: string, flags: string): any => {
   return instance;
 };
 
-export const RegExpPolyfill = function (this: any, pattern?: any, flags?: any): any {
-  // copy-construct forms: new RegExp(/x/g) and new RegExp(/x/, 'i')
-  if (pattern instanceof NativeRegExp) {
-    if (flags === undefined) {
-      flags =
-        (pattern as any).flags !== undefined
-          ? (pattern as any).flags
-          : (pattern.global ? 'g' : '') +
-          (pattern.ignoreCase ? 'i' : '') +
-          (pattern.multiline ? 'm' : '');
-    }
-    pattern = pattern.source;
+const nativeToString = Object.prototype.toString;
+// [[RegExpMatcher]]: a real regex (native, or a sticky-emulated one built on it)
+const isRegExpObject = (x: any): boolean =>
+  x !== null && typeof x === 'object' && nativeToString.call(x) === '[object RegExp]';
+
+// IsRegExp: @@match decides when present, else the internal slot
+const isRegExp = (x: any): boolean => {
+  if (x === null || (typeof x !== 'object' && typeof x !== 'function')) return false;
+  const matchKey = typeof Symbol !== 'undefined' ? (Symbol as any).match : undefined;
+  if (matchKey !== undefined) {
+    const matcher = x[matchKey];
+    if (matcher !== undefined) return !!matcher;
   }
-  const source = pattern === undefined ? '' : String(pattern);
-  let flagString = flags === undefined ? '' : String(flags);
+  return isRegExpObject(x);
+};
+
+/*
+ * EscapePatternForRegExpSource: old engines report `new RegExp('/').source` as
+ * '/', and an instance's source can't be redefined there, so the pattern is
+ * escaped before construction instead. `\/` and the escaped line terminators
+ * match exactly what the bare characters did.
+ */
+const escapeSource = (source: string): string => {
+  if (!/[/\n\r\u2028\u2029]/.test(source)) return source;
+  let out = '';
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const c = source.charAt(i);
+    if (c === '\\') {
+      out += c + source.charAt(i + 1);
+      i++;
+    } else if (c === '/' && !inClass) {
+      out += '\\/';
+    } else if (c === '\n') {
+      out += '\\n';
+    } else if (c === '\r') {
+      out += '\\r';
+    } else if (c === '\u2028') {
+      out += '\\u2028';
+    } else if (c === '\u2029') {
+      out += '\\u2029';
+    } else {
+      if (c === '[') inClass = true;
+      else if (c === ']') inClass = false;
+      out += c;
+    }
+  }
+  return out;
+};
+
+// Declared (pattern, flags): length 2. `this instanceof` stands in for NewTarget.
+export const RegExpPolyfill = function (this: any, pattern?: any, flags?: any): any {
+  const patternIsRegExp = isRegExp(pattern);
+  if (!(this instanceof RegExpPolyfill) && patternIsRegExp && flags === undefined) {
+    const patternConstructor = pattern.constructor;
+    if (patternConstructor === RegExpPolyfill || patternConstructor === NativeRegExp) return pattern;
+  }
+  let P: any = pattern;
+  let F: any = flags;
+  if (isRegExpObject(pattern)) {
+    P = pattern.source;
+    if (flags === undefined) {
+      F = (pattern as any).flags !== undefined
+        ? (pattern as any).flags
+        : (pattern.global ? 'g' : '') + (pattern.ignoreCase ? 'i' : '') + (pattern.multiline ? 'm' : '');
+    }
+  } else if (patternIsRegExp) {
+    // Get(pattern, "source") before Get(pattern, "flags")
+    P = pattern.source;
+    if (flags === undefined) F = pattern.flags;
+  }
+  const source = P === undefined ? '' : escapeSource(String(P));
+  let flagString = F === undefined ? '' : String(F);
   if (!supportsUnicode && flagString.indexOf('u') !== -1) {
     if (!warnedUnicode) {
       warnedUnicode = true;
@@ -130,3 +189,11 @@ export const RegExpPolyfill = function (this: any, pattern?: any, flags?: any): 
 // instances are genuine native regexes, so instanceof keeps working
 RegExpPolyfill.prototype = NativeRegExp.prototype;
 
+
+export const install = (): void => {
+  define(window as any, 'RegExp', RegExpPolyfill);
+  // RegExp.prototype.constructor is RegExp: repoint the shared prototype
+  Object.defineProperty(NativeRegExp.prototype, 'constructor', {
+    value: RegExpPolyfill, writable: true, enumerable: false, configurable: true,
+  });
+};

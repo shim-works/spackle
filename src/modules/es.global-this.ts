@@ -16,6 +16,7 @@ export const isSupported = (): boolean => {
  * - [scope] browser-only: points globalThis at `window`. No worker/Node fallback.
  */
 export const install = (): void => {
-  // No __polyfilled marker: globalThis is window itself.
-  (window as any).globalThis = window;
+  // No __polyfilled marker: globalThis is window itself. Spec descriptor:
+  // writable, non-enumerable, configurable (core-js's global export matches).
+  Object.defineProperty(window, 'globalThis', { value: window, writable: true, enumerable: false, configurable: true });
 };

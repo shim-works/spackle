@@ -8,28 +8,19 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.findlast */
 
-export const arrayFindLast = function <T>(
-  this: ArrayLike<T>,
-  predicate: (value: T, index: number, array: any) => boolean,
-  thisArg?: any
-): T | undefined {
-  if (this === null || this === undefined) {
-    throw new TypeError('Array.prototype.findLast called on null or undefined');
-  }
-  if (typeof predicate !== 'function') {
-    throw new TypeError('predicate must be a function');
-  }
-  // box it so strings / array-likes behave like real arrays
-  const object = Object(this);
-  // inlined: toLength(object.length)
-  let length = +object.length;
+// Declared (callbackfn) only, for the spec length of 1; thisArg comes from arguments.
+export const arrayFindLast = function findLast(this: any, callbackfn: any): any {
+  // inlined: ToObject(this)
+  if (this === null || this === undefined) throw new TypeError('Array.prototype.findLast called on null or undefined');
+  const O = Object(this);
+  // inlined: ToLength(Get(O, "length")) -- before the callback check, as the spec orders it
+  let length = +O.length;
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
-  // walk backwards so we hit the last match first
-  for (let i = length - 1; i >= 0; i--) {
-    if (predicate.call(thisArg, object[i], i, object)) {
-      return object[i];
-    }
+  if (typeof callbackfn !== 'function') throw new TypeError('Array.prototype.findLast: callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = length - 1; k >= 0; k--) {
+    const kValue = O[k];
+    if (callbackfn.call(thisArg, kValue, k, O)) return kValue;
   }
   return undefined;
 };
-

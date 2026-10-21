@@ -28,16 +28,26 @@ export const domCollectionForEach = function (
   }
 };
 
-export const install = (): void => {
-  if (typeof NodeList !== 'undefined' && !NodeList.prototype.forEach) {
-    define((NodeList.prototype as any), 'forEach', domCollectionForEach);
-  }
-  // DOMTokenList (classList) is the other collection core-js patches here.
-  if (
-    typeof DOMTokenList !== 'undefined' &&
-    !(DOMTokenList.prototype as any).forEach
-  ) {
-    define((DOMTokenList.prototype as any), 'forEach', domCollectionForEach);
+/*
+ * WebIDL: an iterable declaration on an interface with indexed properties
+ * (NodeList, DOMTokenList) makes forEach the %Array.prototype.forEach% function
+ * itself -- an enumerable operation. Installed as that native, so it is neither
+ * renamed nor marked; domCollectionForEach above serves engines without one.
+ */
+const installForEach = (proto: any): void => {
+  const arrayForEach = (Array.prototype as any).forEach;
+  // Present already: keep it, unless spackle replaced Array.prototype.forEach --
+  // then follow it, so the collection's forEach stays that same function.
+  if (proto.forEach && !(arrayForEach && arrayForEach.__polyfilled === true && proto.forEach !== arrayForEach)) return;
+  if (typeof arrayForEach === 'function') {
+    Object.defineProperty(proto, 'forEach', { value: arrayForEach, writable: true, enumerable: true, configurable: true });
+  } else {
+    define(proto, 'forEach', domCollectionForEach);
   }
 };
 
+export const install = (): void => {
+  if (typeof NodeList !== 'undefined') installForEach(NodeList.prototype);
+  // DOMTokenList (classList) is the other indexed iterable interface.
+  if (typeof DOMTokenList !== 'undefined') installForEach(DOMTokenList.prototype);
+};

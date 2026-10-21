@@ -1,7 +1,7 @@
 import { isSupported as epsilonSupported } from '../src/modules/es.number.epsilon.js';
 import { isSupported as maxSupported } from '../src/modules/es.number.max-safe-integer.js';
 import { isSupported as minSupported } from '../src/modules/es.number.min-safe-integer.js';
-import { isSupported as globalThisSupported } from '../src/modules/es.global-this.js';
+import { isSupported as globalThisSupported, install as installGlobalThis } from '../src/modules/es.global-this.js';
 
 /**
  * Conformance for the ES2015 Number constants + globalThis islands.
@@ -30,5 +30,19 @@ describe('globalThis', () => {
     expect(typeof globalThis).not.toBe('undefined');
     expect((globalThis as any).globalThis).toBe(globalThis);
     expect(globalThisSupported()).toBe(true);
+  });
+
+  it('installs with the spec descriptor: writable, non-enumerable, configurable', () => {
+    const w: any = window;
+    const saved = Object.getOwnPropertyDescriptor(w, 'globalThis')!;
+    try {
+      delete w.globalThis;
+      installGlobalThis();
+      const d = Object.getOwnPropertyDescriptor(w, 'globalThis')!;
+      expect(d.value).toBe(w);
+      expect([d.writable, d.enumerable, d.configurable]).toEqual([true, false, true]);
+    } finally {
+      Object.defineProperty(w, 'globalThis', saved);
+    }
   });
 });

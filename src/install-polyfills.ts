@@ -93,7 +93,7 @@ import { isSupported as isArrayUnscopablesFlatSupported, install as installArray
 import { isSupported as isArrayUnscopablesFlatMapSupported, install as installArrayUnscopablesFlatMap } from './modules/es.array.unscopables.flat-map.js';
 import { isSupported as isArrayUnshiftSupported, arrayUnshift } from './modules/es.array.unshift.js';
 import { isSupported as isArrayWithSupported, arrayWith } from './modules/es.array.with.js';
-import { isSupported as isRegexpConstructorSupported, RegExpPolyfill } from './modules/es.regexp.constructor.js';
+import { isSupported as isRegexpConstructorSupported, install as installRegexpConstructor } from './modules/es.regexp.constructor.js';
 import { isSupported as isRegexpDotAllSupported, install as installRegexpDotAll } from './modules/es.regexp.dot-all.js';
 import { isSupported as isRegexpEscapeSupported, regExpEscape } from './modules/es.regexp.escape.js';
 import { isSupported as isRegexpFlagsSupported, install as installRegexpFlags } from './modules/es.regexp.flags.js';
@@ -149,7 +149,7 @@ import { isSupported as isMathSumPreciseSupported, mathSumPrecise } from './modu
 import { isSupported as isMathTanhSupported, mathTanh } from './modules/es.math.tanh.js';
 import { isSupported as isMathToStringTagSupported, install as installMathToStringTag } from './modules/es.math.to-string-tag.js';
 import { isSupported as isMathTruncSupported, mathTrunc } from './modules/es.math.trunc.js';
-import { isSupported as isNumberConstructorSupported, NumberPolyfill } from './modules/es.number.constructor.js';
+import { isSupported as isNumberConstructorSupported, install as installNumberConstructor } from './modules/es.number.constructor.js';
 import { isSupported as isNumberEpsilonSupported, install as installNumberEpsilon } from './modules/es.number.epsilon.js';
 import { isSupported as isNumberIsFiniteSupported, numberIsFinite } from './modules/es.number.is-finite.js';
 import { isSupported as isNumberIsIntegerSupported, numberIsInteger } from './modules/es.number.is-integer.js';
@@ -200,6 +200,9 @@ export const installPolyfills = (): void => {
   // Ungated: es.weak-map has a SUPPORTED branch too -- a native WeakMap that
   // rejects symbol keys still needs patching, and gating here would skip it.
   installWeakMap();
+  // queueMicrotask before Promise: the Promise island schedules its jobs through
+  // it, so both share one FIFO queue.
+  if (!isQueueMicrotaskSupported()) define(window, 'queueMicrotask', queueMicrotask);
   if (!isPromiseSupported()) installPromise();
   installDisposable();
   if (!isUrlSearchParamsSupported()) installUrlSearchParams();
@@ -247,7 +250,11 @@ export const installPolyfills = (): void => {
   if (!isObjectValuesSupported()) define(Object, 'values', objectValues);
   // Reflect itself BEFORE its @@toStringTag: the tagger can only tag a Reflect
   // that exists, and on an engine without a native one that is this line's job.
-  if (!isReflectImplSupported()) define(window, 'Reflect', Reflect);
+  // Not define(): that names the value, and the Reflect namespace has no `name`.
+  if (!isReflectImplSupported()) {
+    Object.defineProperty(window, 'Reflect', { value: Reflect, writable: true, enumerable: false, configurable: true });
+    Object.defineProperty(Reflect, '__polyfilled', { value: true });
+  }
   if (!isReflectToStringTagSupported()) installReflectToStringTag();
 
   // Array.
@@ -280,6 +287,7 @@ export const installPolyfills = (): void => {
   if (!isArraySliceSupported()) define(Array.prototype, 'slice', arraySlice);
   if (!isArraySomeSupported()) define(Array.prototype, 'some', arraySome);
   if (!isArraySortSupported()) define(Array.prototype, 'sort', arraySort);
+  // After map and filter: their gates read the native Array[@@species], not this getter.
   if (!isArraySpeciesSupported()) installArraySpecies();
   if (!isArraySpliceSupported()) define(Array.prototype, 'splice', arraySplice);
   if (!isArrayToReversedSupported()) define(Array.prototype, 'toReversed', arrayToReversed);
@@ -292,7 +300,7 @@ export const installPolyfills = (): void => {
 
   // String and RegExp.
   if (!isStringIteratorSupported()) installStringIterator();
-  if (!isRegexpConstructorSupported()) define(window, 'RegExp', RegExpPolyfill);
+  if (!isRegexpConstructorSupported()) installRegexpConstructor();
   if (!isRegexpDotAllSupported()) installRegexpDotAll();
   if (!isRegexpEscapeSupported()) define(RegExp, 'escape', regExpEscape);
   if (!isRegexpFlagsSupported()) installRegexpFlags();
@@ -352,7 +360,7 @@ export const installPolyfills = (): void => {
   if (!isMathTanhSupported()) define(Math, 'tanh', mathTanh);
   if (!isMathToStringTagSupported()) installMathToStringTag();
   if (!isMathTruncSupported()) define(Math, 'trunc', mathTrunc);
-  if (!isNumberConstructorSupported()) define(window, 'Number', NumberPolyfill);
+  if (!isNumberConstructorSupported()) installNumberConstructor();
   if (!isNumberEpsilonSupported()) installNumberEpsilon();
   if (!isNumberIsFiniteSupported()) define(Number, 'isFinite', numberIsFinite);
   if (!isNumberIsIntegerSupported()) define(Number, 'isInteger', numberIsInteger);
@@ -391,7 +399,6 @@ export const installPolyfills = (): void => {
     define(window, 'clearImmediate', clearImmediate);
   }
   if (typeof window !== 'undefined' && !isAtobSupported()) define(window, 'atob', atobPolyfill);
-  if (!isQueueMicrotaskSupported()) define(window, 'queueMicrotask', queueMicrotask);
   if (!isSelfSupported()) installSelf();
   if (!isStructuredCloneSupported()) define(window, 'structuredClone', structuredClone);
   if (!isUrlSearchParamsDeleteSupported()) installUrlSearchParamsDelete();

@@ -42,26 +42,43 @@ export const isSupported = (): boolean => {
  *   the flag but ignores @@species on concat (Chrome 48-50) keeps its native.
  */
 
-export const arrayConcat = function (this: any): any[] {
+// One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
+// cleared after each run so it never pins an element.
+const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+// CreateDataPropertyOrThrow, the fast way when it is the same thing: on an array
+// this call created, with nothing at that index up the prototype chain, a plain
+// write cannot hit a setter or a read-only slot. Anything else (a @@species or
+// `this` constructor's object, an index defined on Array.prototype) goes through
+// defineProperty, as the spec requires. core-js always pays for defineProperty.
+const ArrayProto = Array.prototype;
+
+// Declared (_item) for the spec length of 1; the items come from arguments.
+export const arrayConcat = function concat(this: any, _item?: any): any[] {
   if (this === null || this === undefined) {
     throw new TypeError('Array.prototype.concat called on null or undefined');
   }
   const object = Object(this);
-  // inlined: speciesCreate(object, 0)
+  // inlined: ArraySpeciesCreate(object, 0)
   let result: any;
+  let plain = true; // false once a @@species constructor builds the result
   if (!Array.isArray(object)) {
     result = new Array(0);
   } else {
     let ctor: any = object.constructor;
-    if (typeof Symbol !== 'undefined' && (Symbol as any).species && ctor != null) {
-      const species = ctor[(Symbol as any).species];
-      ctor = species == null ? undefined : species;
+    if (ctor !== null && (typeof ctor === 'object' || typeof ctor === 'function')) {
+      if (typeof Symbol !== 'undefined' && (Symbol as any).species) {
+        ctor = ctor[(Symbol as any).species];
+        if (ctor === null) ctor = undefined;
+      }
+    } else if (ctor !== undefined) {
+      throw new TypeError('Array.prototype.concat: constructor is not an object');
     }
     if (ctor === undefined || ctor === Array) {
       result = new Array(0);
     } else {
-      if (typeof ctor !== 'function') throw new TypeError('constructor property is not a constructor');
+      if (typeof ctor !== 'function') throw new TypeError('Array.prototype.concat: @@species is not a constructor');
       result = new ctor(0);
+      plain = false;
     }
   }
   let out = 0;
@@ -69,7 +86,7 @@ export const arrayConcat = function (this: any): any[] {
   let source: any = object;
   let argIndex = 0;
   while (true) {
-    // inlined: isSpreadable(source)
+    // inlined: IsConcatSpreadable(source)
     let spreadable = false;
     if (source !== null && (typeof source === 'object' || typeof source === 'function')) {
       const flag =
@@ -82,22 +99,36 @@ export const arrayConcat = function (this: any): any[] {
       // inlined: toLength(source.length)
       let length = +source.length;
       length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
+      if (out + length > 9007199254740991) {
+        throw new TypeError('Array.prototype.concat: result length exceeds 2^53-1');
+      }
       for (let i = 0; i < length; i++) {
         // holes stay holes
         if (i in source) {
-          result[out] = source[i];
+          if (plain && !(out in ArrayProto)) result[out] = source[i];
+          else {
+            dataDesc.value = source[i];
+            Object.defineProperty(result, out, dataDesc);
+          }
         }
         out++;
       }
     } else {
-      result[out++] = source;
+      if (out >= 9007199254740991) {
+        throw new TypeError('Array.prototype.concat: result length exceeds 2^53-1');
+      }
+      if (plain && !(out in ArrayProto)) result[out++] = source;
+      else {
+        dataDesc.value = source;
+        Object.defineProperty(result, out++, dataDesc);
+      }
     }
     if (argIndex >= arguments.length) {
       break;
     }
     source = arguments[argIndex++];
   }
+  dataDesc.value = undefined;
   result.length = out;
   return result;
 };
-

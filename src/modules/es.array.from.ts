@@ -51,83 +51,127 @@ export const isSupported = (): boolean => {
 // once-flag for the astral-split warn below — this path can run per keystroke
 let warnedAstralSplit = false;
 
-export const arrayFrom = function <T>(
-  this: any,
-  source: ArrayLike<T> | Iterable<T>,
-  mapFn?: (value: T, index: number) => any,
-  thisArg?: any,
-): T[] {
-  // Spec: ToObject(source) — null/undefined cannot be converted.
-  if (source === null || source === undefined) {
+// One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
+// cleared after each run so it never pins an element.
+const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+// CreateDataPropertyOrThrow, the fast way when it is the same thing: on an array
+// this call created, with nothing at that index up the prototype chain, a plain
+// write cannot hit a setter or a read-only slot. Anything else (a @@species or
+// `this` constructor's object, an index defined on Array.prototype) goes through
+// defineProperty, as the spec requires. core-js always pays for defineProperty.
+const ArrayProto = Array.prototype;
+
+// IsConstructor without calling the candidate: the native Reflect.construct
+// (captured before any polyfill) throws for a non-constructor newTarget. On
+// engines without it, a function with an own prototype is the best ES5 test.
+const nativeConstruct: any =
+  typeof Reflect !== 'undefined' && typeof (Reflect as any).construct === 'function' ? (Reflect as any).construct : undefined;
+const noArgs: any[] = [];
+const isConstructor = (C: any): boolean => {
+  if (typeof C !== 'function') return false;
+  if (nativeConstruct) {
+    try {
+      nativeConstruct(String, noArgs, C);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return Object.prototype.hasOwnProperty.call(C, 'prototype');
+};
+
+// Declared (items) for the spec length of 1; mapfn and thisArg come from arguments.
+export const arrayFrom = function from(this: any, items: any): any {
+  const C: any = this;
+  const mapfn = arguments.length > 1 ? arguments[1] : undefined;
+  const thisArg = arguments.length > 2 ? arguments[2] : undefined;
+  if (mapfn !== undefined && typeof mapfn !== 'function') {
+    throw new TypeError('Array.from: when provided, the second argument must be a function');
+  }
+  if (items === null || items === undefined) {
     throw new TypeError('Array.from requires an array-like or iterable object');
   }
 
-  // Spec: if mapFn is supplied it must be callable.
-  if (mapFn !== undefined && typeof mapFn !== 'function') {
-    throw new TypeError('Array.from: when provided, the second argument must be a function');
+  // GetMethod(items, @@iterator); the '@@iterator' string key on Symbol-less engines
+  let usingIterator: any =
+    typeof Symbol !== 'undefined' && (Symbol as any).iterator ? items[(Symbol as any).iterator] : items['@@iterator'];
+  if (usingIterator === null) usingIterator = undefined;
+  if (usingIterator !== undefined && typeof usingIterator !== 'function') {
+    throw new TypeError('Array.from: @@iterator is not a function');
   }
 
-  // Spec: `this` is the constructor, so `Sub.from(...)` yields a Sub.
-  const Ctor: any = this;
-  const useCtor = typeof Ctor === 'function' && Ctor !== Array;
-
-  // 1. Iterable path (Symbol.iterator or the older @@iterator key).
-  const iteratorMethod =
-    (typeof Symbol !== 'undefined' &&
-      Symbol.iterator &&
-      (source as any)[Symbol.iterator]) ||
-    (source as any)['@@iterator'];
-
-  if (typeof iteratorMethod === 'function') {
-    // Spec: Construct(C) with no length — the count isn't known up front here.
-    const result: any = useCtor ? new Ctor() : [];
-    const iterator = iteratorMethod.call(source);
-    let index = 0;
-    // Spec: a throwing mapFn (or write) closes the iterator; an error from the
-    // iterator's own next()/done/value propagates without closing it.
-    for (let step = iterator.next(); !step.done; step = iterator.next()) {
+  if (usingIterator !== undefined) {
+    // false when `this` is a constructor that builds the result itself
+    const plain = !(C !== Array && isConstructor(C));
+    const A: any = plain ? [] : new C();
+    const iterator = usingIterator.call(items);
+    if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) {
+      throw new TypeError('Array.from: iterator is not an object');
+    }
+    // GetIteratorDirect reads next once
+    const next = iterator.next;
+    let k = 0;
+    while (true) {
+      const step = next.call(iterator);
+      if (step === null || (typeof step !== 'object' && typeof step !== 'function')) {
+        throw new TypeError('Array.from: iterator result is not an object');
+      }
+      if (step.done) {
+        A.length = k;
+        return A;
+      }
       const value = step.value;
+      // a throwing mapfn or a failed definition closes the iterator; errors from
+      // next()/done/value propagate without closing it
       try {
-        result[index] = mapFn ? mapFn.call(thisArg, value, index) : value;
+        if (k >= 9007199254740991) throw new TypeError('Array.from: too many elements');
+        if (plain && !(k in ArrayProto)) A[k] = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
+        else {
+          dataDesc.value = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
+          Object.defineProperty(A, k, dataDesc);
+        }
+        dataDesc.value = undefined;
       } catch (error) {
-        if (typeof iterator.return === 'function') {
-          // A throw from return() itself must not mask the original error.
+        dataDesc.value = undefined;
+        const ret = iterator['return'];
+        if (ret !== undefined && ret !== null) {
+          // a throw from return() itself must not mask the original error
           try {
-            iterator.return();
+            ret.call(iterator);
           } catch {
-            /* swallow — the original error is what matters */
+            /* the original error is what matters */
           }
         }
         throw error;
       }
-      index++;
+      k++;
     }
-    // Spec sets length explicitly: a custom constructor's instance does not
-    // grow one from index assignment the way an Array does.
-    result.length = index;
-    return result;
   }
 
-  // 2. Array-like path (object with .length, read by index).
-  if (typeof source === 'string' && !warnedAstralSplit && /[\uD800-\uDFFF]/.test(source)) {
+  // array-like path
+  if (typeof items === 'string' && !warnedAstralSplit && /[\uD800-\uDFFF]/.test(items)) {
     warnedAstralSplit = true;
     console.warn(
       '[spackle] Array.from: no Symbol.iterator on this engine, so strings split by UTF-16 unit — astral characters break into surrogate halves'
     );
   }
-  const arrayLike = source as ArrayLike<T>;
+  const arrayLike = Object(items);
   // inlined: toLength(arrayLike.length)
   let length = +arrayLike.length;
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
-  // Spec: Construct(C, [len]) here — the length IS known on this path.
-  const result: any = useCtor ? new Ctor(length) : [];
-  for (let i = 0; i < length; i++) {
-    if (mapFn) {
-      result[i] = mapFn.call(thisArg, arrayLike[i], i);
-    } else {
-      result[i] = arrayLike[i];
+  // Construct(C, [len]) here -- the length IS known on this path
+  // false when `this` is a constructor that builds the result itself
+  const plain = !(C !== Array && isConstructor(C));
+  const A: any = plain ? new Array(length) : new C(length);
+  for (let k = 0; k < length; k++) {
+    const kValue = arrayLike[k];
+    if (plain && !(k in ArrayProto)) A[k] = mapfn !== undefined ? mapfn.call(thisArg, kValue, k) : kValue;
+    else {
+      dataDesc.value = mapfn !== undefined ? mapfn.call(thisArg, kValue, k) : kValue;
+      Object.defineProperty(A, k, dataDesc);
     }
   }
-  result.length = length;
-  return result;
+  dataDesc.value = undefined;
+  A.length = length;
+  return A;
 };

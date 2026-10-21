@@ -1,5 +1,6 @@
 // Number constructor — behavioral: ES2015 taught Number('0b101') / Number('0o17')
 // to parse binary and octal string literals; older engines return NaN.
+import { define } from '../define.js';
 export const isSupported = (): boolean => {
   try {
     return Number('0b101') === 5 && Number('0o17') === 15;
@@ -15,8 +16,8 @@ export const isNumberConstructorSupported = isSupported;
  *
  * Known limitations:
  * - [incomplete] only the ES2015 StringNumericLiteral additions are fixed
- *   (binary '0b' / octal '0o' string parsing); everything else defers to the
- *   native constructor, and prototype.constructor is left pointing at it.
+ *   (binary '0b' / octal '0o' string parsing, U+180E no longer whitespace);
+ *   everything else defers to the native constructor.
  */
 
 const NativeNumber = Number;
@@ -24,6 +25,9 @@ const NativeNumber = Number;
 export const NumberPolyfill = function (this: any, value?: any): any {
   let input: any = arguments.length === 0 ? 0 : value;
   if (arguments.length !== 0 && typeof value === 'string') {
+    // U+180E left the whitespace set in Unicode 6.3; old engines still trim
+    // it. It can't appear inside a numeric literal, so anywhere means NaN.
+    if (value.indexOf('\u180E') !== -1) input = NaN;
     // inlined: parseNumericString(value) -- 0b/0o literals; anything else is native
     const trimmed = value.replace(/^\s+|\s+$/g, '');
     if (trimmed.length > 2 && trimmed.charAt(0) === '0') {
@@ -74,3 +78,11 @@ for (let i = 0; i < staticKeys.length; i++) {
   }
 }
 
+
+export const install = (): void => {
+  define(window as any, 'Number', NumberPolyfill);
+  // Number.prototype.constructor is Number: repoint the shared prototype
+  Object.defineProperty(NativeNumber.prototype, 'constructor', {
+    value: NumberPolyfill, writable: true, enumerable: false, configurable: true,
+  });
+};

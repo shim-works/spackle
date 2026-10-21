@@ -16,14 +16,49 @@ export const isSupported = (): boolean => {
  *
  * Generic on `this`: `Sub.of(1, 2)` builds a Sub.
  */
-export const arrayOf = function (this: any, ...args: any[]): any[] {
-  const Ctor: any = this;
-  // Plain Array.of (or an unbound call): the args array IS the result.
-  if (typeof Ctor !== 'function' || Ctor === Array) return args;
-  const result: any = new Ctor(args.length);
-  for (let i = 0; i < args.length; i++) {
-    result[i] = args[i];
+// One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
+// cleared after each run so it never pins an element.
+const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+// CreateDataPropertyOrThrow, the fast way when it is the same thing: on an array
+// this call created, with nothing at that index up the prototype chain, a plain
+// write cannot hit a setter or a read-only slot. Anything else (a @@species or
+// `this` constructor's object, an index defined on Array.prototype) goes through
+// defineProperty, as the spec requires. core-js always pays for defineProperty.
+const ArrayProto = Array.prototype;
+
+// IsConstructor without calling the candidate: the native Reflect.construct
+// (captured before any polyfill) throws for a non-constructor newTarget. On
+// engines without it, a function with an own prototype is the best ES5 test.
+const nativeConstruct: any =
+  typeof Reflect !== 'undefined' && typeof (Reflect as any).construct === 'function' ? (Reflect as any).construct : undefined;
+const noArgs: any[] = [];
+const isConstructor = (C: any): boolean => {
+  if (typeof C !== 'function') return false;
+  if (nativeConstruct) {
+    try {
+      nativeConstruct(String, noArgs, C);
+      return true;
+    } catch {
+      return false;
+    }
   }
-  result.length = args.length;
-  return result;
+  return Object.prototype.hasOwnProperty.call(C, 'prototype');
+};
+
+export const arrayOf = function of(this: any): any {
+  const C: any = this;
+  const len = arguments.length;
+  // false when `this` is a constructor that builds the result itself
+  const plain = !(C !== Array && isConstructor(C));
+  const A: any = plain ? new Array(len) : new C(len);
+  for (let k = 0; k < len; k++) {
+    if (plain && !(k in ArrayProto)) A[k] = arguments[k];
+    else {
+      dataDesc.value = arguments[k];
+      Object.defineProperty(A, k, dataDesc);
+    }
+  }
+  dataDesc.value = undefined;
+  A.length = len;
+  return A;
 };

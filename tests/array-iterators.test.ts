@@ -1,4 +1,4 @@
-import { arrayEntries, arrayKeys, arrayValues } from '../src/modules/es.array.iterator.js';
+import { arrayEntries, arrayKeys, arrayValues, install as installArrayIterator } from '../src/modules/es.array.iterator.js';
 
 /**
  * test262-derived conformance suite for the Array.prototype.keys / values /
@@ -62,5 +62,53 @@ describe('Array.prototype.keys/values/entries — test262 conformance', () => {
       'a',
       'b',
     ]);
+  });
+});
+
+// Chrome 41 shape: native @@iterator, keys and entries, but no values.
+describe('install() over a native @@iterator with no values (core-js iterator-define)', () => {
+  const AP: any = Array.prototype;
+  const ITER = Symbol.iterator;
+  const TAG = Symbol.toStringTag;
+  const nativeIter = AP[ITER];
+  const nativeProto = Object.getPrototypeOf([][ITER]());
+  let saved: { values: PropertyDescriptor; iter: PropertyDescriptor; tag: PropertyDescriptor | undefined };
+
+  beforeEach(() => {
+    saved = {
+      values: Object.getOwnPropertyDescriptor(AP, 'values')!,
+      iter: Object.getOwnPropertyDescriptor(AP, ITER)!,
+      tag: Object.getOwnPropertyDescriptor(nativeProto, TAG),
+    };
+  });
+  afterEach(() => {
+    Object.defineProperty(AP, 'values', saved.values);
+    Object.defineProperty(AP, ITER, saved.iter);
+    if (saved.tag) Object.defineProperty(nativeProto, TAG, saved.tag);
+  });
+
+  it('uses the native @@iterator as values when it is already named values', () => {
+    delete AP.values;
+    installArrayIterator();
+    expect(AP.values).toBe(nativeIter);
+    expect(AP[ITER]).toBe(AP.values);
+  });
+
+  it('wraps a misnamed native @@iterator, so values and @@iterator are one function on the native prototype', () => {
+    delete AP.values;
+    Object.defineProperty(AP, ITER, { value: function notValues(this: any) { return nativeIter.call(this); }, writable: true, configurable: true });
+    installArrayIterator();
+    expect(AP.values.name).toBe('values');
+    expect(AP[ITER]).toBe(AP.values);
+    expect(Object.getPrototypeOf(AP.values.call([1]))).toBe(nativeProto);
+    expect(Object.getPrototypeOf(AP.values.call({ length: 2 }))).toBe(nativeProto);
+  });
+
+  it('tags the native %ArrayIteratorPrototype% when the engine left it untagged', () => {
+    delete nativeProto[TAG];
+    installArrayIterator();
+    const d = Object.getOwnPropertyDescriptor(nativeProto, TAG)!;
+    expect(d.value).toBe('Array Iterator');
+    expect([d.writable, d.enumerable, d.configurable]).toEqual([false, false, true]);
   });
 });

@@ -11,7 +11,20 @@ export const isSupported = (): boolean => {
  * Inspired by: es-shims array.prototype.with (lean ES5 rewrite)
  */
 
-export const arrayWith = function <T>(this: ArrayLike<T>, index: number, value: T): T[] {
+// One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
+// cleared after each run so it never pins an element.
+const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+// CreateDataPropertyOrThrow, the fast way when it is the same thing: on an array
+// this call created, with nothing at that index up the prototype chain, a plain
+// write cannot hit a setter or a read-only slot. Anything else (a @@species or
+// `this` constructor's object, an index defined on Array.prototype) goes through
+// defineProperty, as the spec requires. core-js always pays for defineProperty.
+const ArrayProto = Array.prototype;
+
+export const arrayWith = function (this: any, index: any, value: any): any[] {
+  if (this === null || this === undefined) {
+    throw new TypeError('Array.prototype.with called on null or undefined');
+  }
   // box it so strings / array-likes behave like real arrays
   const object = Object(this);
   // inlined: toLength(object.length)
@@ -26,17 +39,17 @@ export const arrayWith = function <T>(this: ArrayLike<T>, index: number, value: 
     actualIndex = length + relativeIndex;
   }
   if (actualIndex < 0 || actualIndex >= length) {
-    throw new RangeError('Invalid index : ' + index);
+    throw new RangeError('Array.prototype.with: index out of range');
   }
-  const result: T[] = new Array(length);
+  const result: any[] = new Array(length);
   // copy everything, swapping in the new value at the one spot
   for (let i = 0; i < length; i++) {
-    if (i === actualIndex) {
-      result[i] = value;
-    } else {
-      result[i] = object[i];
+    if (!(i in ArrayProto)) result[i] = i === actualIndex ? value : object[i];
+    else {
+      dataDesc.value = i === actualIndex ? value : object[i];
+      Object.defineProperty(result, i, dataDesc);
     }
   }
+  dataDesc.value = undefined;
   return result;
 };
-

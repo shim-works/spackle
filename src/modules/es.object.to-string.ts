@@ -32,7 +32,11 @@ export const objectToString = function (this: any): string {
     let tag;
     try {
       tag = this[(Symbol as any).toStringTag];
-    } catch {
+    } catch (error) {
+      // Spec: a getter's error propagates. core-js swallows every error (an IE11
+      // workaround); only a cross-origin window's SecurityError is swallowed
+      // here, so type checks on window.parent from an iframe don't throw.
+      if (!error || (error as any).name !== 'SecurityError') throw error;
       tag = undefined;
     }
     if (typeof tag === 'string') {

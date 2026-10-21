@@ -44,7 +44,7 @@ export const dateToPrimitive = function (this: any, hint: any): any {
 
 export const install = (): void => {
   if (typeof Symbol !== 'undefined' && (Symbol as any).toPrimitive) {
-    Object.defineProperty((Date.prototype as any), (Symbol as any).toPrimitive, { value: dateToPrimitive, writable: true, enumerable: false, configurable: true });
+    Object.defineProperty((Date.prototype as any), (Symbol as any).toPrimitive, { value: dateToPrimitive, writable: false, enumerable: false, configurable: true });
     try { Object.defineProperty(dateToPrimitive, 'name', { value: '[Symbol.toPrimitive]', configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
     Object.defineProperty(((Date.prototype as any)[(Symbol as any).toPrimitive] as any), '__polyfilled', { value: true });
   }

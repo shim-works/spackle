@@ -13,24 +13,23 @@ export const isSupported = (): boolean => {
 const MAX_SAFE_LENGTH = 9007199254740991;
 const floor = Math.floor;
 
-export const arrayIncludes = function (
-  this: any[],
-  searchElement: any,
-  fromIndex?: number,
-): boolean {
-  // inlined: toLength(this.length) -- NaN and negatives become 0, fractions
+// Declared (searchElement) only, for the spec length of 1; fromIndex comes from arguments.
+export const arrayIncludes = function includes(this: any, searchElement: any): boolean {
+  // inlined: ToObject(this)
+  if (this === null || this === undefined) {
+    throw new TypeError('Array.prototype.includes called on null or undefined');
+  }
+  const O = Object(this);
+  // inlined: toLength(O.length) -- NaN and negatives become 0, fractions
   // are floored, clamped to 2^53 - 1
-  let length = +this.length;
+  let length = +O.length;
   length = length !== length || length <= 0 ? 0 : length > MAX_SAFE_LENGTH ? MAX_SAFE_LENGTH : floor(length);
   if (length === 0) {
     return false;
   }
 
-  // ToInteger(fromIndex): NaN -> 0; otherwise truncate toward zero.
-  let position = 0;
-  if (fromIndex !== undefined) {
-    position = +(fromIndex as any); // +x, not Number(x)
-  }
+  // ToIntegerOrInfinity(fromIndex): NaN -> 0; otherwise truncate toward zero.
+  let position = arguments.length > 1 ? +arguments[1] : 0; // +x, not Number(x)
   if (position !== position) {
     // NaN, so reset to the start
     position = 0;
@@ -51,7 +50,7 @@ export const arrayIncludes = function (
   }
 
   for (let i = start; i < length; i++) {
-    const element = this[i];
+    const element = O[i];
     if (
       element === searchElement ||
       // SameValueZero: NaN matches NaN.
@@ -62,4 +61,3 @@ export const arrayIncludes = function (
   }
   return false;
 };
-

@@ -8,6 +8,10 @@ import { arrayReverse } from '../src/modules/es.array.reverse.js';
  * hand-rolled impls directly.
  */
 describe('Array.prototype.push island', () => {
+  it('has the spec length of 1', () => {
+    expect(arrayPush.length).toBe(1);
+  });
+
   it('appends and returns the new length', () => {
     const a = [1, 2];
     expect(arrayPush.call(a, 3, 4)).toBe(4);
@@ -23,6 +27,10 @@ describe('Array.prototype.push island', () => {
 });
 
 describe('Array.prototype.unshift island', () => {
+  it('has the spec length of 1', () => {
+    expect(arrayUnshift.length).toBe(1);
+  });
+
   it('prepends and returns the new length', () => {
     const a = [3, 4];
     expect(arrayUnshift.call(a, 1, 2)).toBe(4);

@@ -73,13 +73,13 @@ describe('URL polyfill — retention shape', () => {
     expect(url._params).not.toBe(null);
   });
 
-  it('reuses one resolver document across constructions', () => {
+  it('parses without building documents', () => {
     const before = createDocSpy.mock.calls.length;
     new PolyfilledURL('/one', 'http://a');
     new PolyfilledURL('/two', 'http://a');
     new PolyfilledURL('/three', 'http://a');
-    // one document total, however many URLs get built
-    expect(createDocSpy.mock.calls.length - before).toBeLessThanOrEqual(1);
+    // the parser is a state machine now: no resolver document at all
+    expect(createDocSpy.mock.calls.length - before).toBe(0);
   });
 });
 
@@ -110,5 +110,33 @@ describe('URL polyfill — parsing', () => {
 
   it('throws on input with no protocol', () => {
     expect(() => new PolyfilledURL('not-a-url')).toThrow();
+  });
+});
+
+describe('URL polyfill — file: and hash routing', () => {
+  it('parses file: URLs, drive letters and dot segments', () => {
+    const u = new PolyfilledURL('file:///android_asset/www/index.html?x=1#/home');
+    expect([u.protocol, u.host, u.pathname, u.search, u.hash, u.origin]).toEqual(
+      ['file:', '', '/android_asset/www/index.html', '?x=1', '#/home', 'null']);
+    expect(new PolyfilledURL('file:///C:/a/../../b').href).toBe('file:///C:/b');
+    expect(new PolyfilledURL('file://localhost/etc/hosts').href).toBe('file:///etc/hosts');
+    expect(new PolyfilledURL('img/a.png', 'file:///android_asset/www/index.html').href)
+      .toBe('file:///android_asset/www/img/a.png');
+  });
+
+  it('keeps a hash route, query and all, and resolves against it', () => {
+    const u = new PolyfilledURL('https://app.example/#/users/7?tab=posts');
+    expect(u.hash).toBe('#/users/7?tab=posts');
+    expect(u.search).toBe('');
+    expect(new PolyfilledURL('#/settings', u.href).href).toBe('https://app.example/#/settings');
+    u.hash = '/about';
+    expect(u.href).toBe('https://app.example/#/about');
+    u.hash = '';
+    expect(u.href).toBe('https://app.example/');
+  });
+
+  it('handles ws:, wss:, credentials and empty ? / #', () => {
+    expect(new PolyfilledURL('wss://u:p@sock.example:443/live?#').href).toBe('wss://u:p@sock.example/live?#');
+    expect(new PolyfilledURL('ws://sock.example:8080').port).toBe('8080');
   });
 });

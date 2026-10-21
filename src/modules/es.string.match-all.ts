@@ -92,6 +92,12 @@ if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
 
 const objectToString = Object.prototype.toString;
 
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
 // RegExp.prototype[@@matchAll], inline: no engine this installs on has one.
 const regExpMatchAll = (R: any, s: string): any => {
   const Default = (window as any).RegExp;
@@ -124,16 +130,17 @@ const regExpMatchAll = (R: any, s: string): any => {
   return iterator;
 };
 
-export const stringMatchAll = function (this: any, regexp: any): any {
+export const stringMatchAll = function matchAll(this: any, regexp: any): any {
   if (this === null || this === undefined) {
     throw new TypeError(
       "String.prototype.matchAll called on null or undefined",
     );
   }
+  const matchAllKey = typeof Symbol !== "undefined" ? (Symbol as any).matchAll : undefined; // inlined: symbolKey("matchAll")
   if (regexp !== null && regexp !== undefined) {
     // inlined: isRegExp(regexp) -- primitives skip straight past
     let isRegExpValue = false;
-    if (regexp !== null && (typeof regexp === "object" || typeof regexp === "function")) {
+    if (typeof regexp === "object" || typeof regexp === "function") {
       const matchKey = typeof Symbol !== "undefined" ? (Symbol as any).match : undefined; // inlined: symbolKey("match")
       const matcher = matchKey ? regexp[matchKey] : undefined;
       isRegExpValue = matcher !== undefined ? !!matcher : objectToString.call(regexp) === "[object RegExp]";
@@ -143,27 +150,32 @@ export const stringMatchAll = function (this: any, regexp: any): any {
       if (flags === null || flags === undefined) {
         throw new TypeError("String.prototype.matchAll called with a RegExp whose flags are null or undefined");
       }
-      if (String(flags).indexOf("g") === -1) {
+      if (toStr(flags).indexOf("g") === -1) {
         throw new TypeError(
           "String.prototype.matchAll called with a non-global RegExp argument",
         );
       }
     }
-    const matchAllKey = typeof Symbol !== "undefined" ? (Symbol as any).matchAll : undefined; // inlined: symbolKey("matchAll")
+    // GetMethod(regexp, @@matchAll)
     const matcher = matchAllKey ? regexp[matchAllKey] : undefined;
     if (matcher !== undefined && matcher !== null) {
+      if (typeof matcher !== "function") throw new TypeError("String.prototype.matchAll: @@matchAll is not a function");
       return matcher.call(regexp, this);
     }
-    // A real RegExp is spec'd to HAVE @@matchAll (on its prototype); these
-    // engines lack it, so run that method's steps on it directly -- keeping
-    // its flags and lastIndex, which RegExpCreate below would discard.
-    if (objectToString.call(regexp) === "[object RegExp]") {
-      return regExpMatchAll(regexp, typeof this === 'string' ? this : String(this));
+    // A real RegExp is spec'd to HAVE @@matchAll (on its prototype); engines
+    // without one get that method's steps run directly -- keeping its flags and
+    // lastIndex, which RegExpCreate below would discard.
+    if (objectToString.call(regexp) === "[object RegExp]" && !(matchAllKey && typeof (RegExp.prototype as any)[matchAllKey] === "function")) {
+      return regExpMatchAll(regexp, toStr(this));
     }
   }
-  const s = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
-  // RegExpCreate(regexp, "g")
+  const s = toStr(this);
+  // RegExpCreate(regexp, "g"), then Invoke(rx, @@matchAll, S)
   const rx = new ((window as any).RegExp)(regexp === undefined ? "" : regexp, "g");
+  const method = matchAllKey ? rx[matchAllKey] : undefined;
+  if (typeof method === "function") {
+    return method.call(rx, s);
+  }
   return regExpMatchAll(rx, s);
 };
 

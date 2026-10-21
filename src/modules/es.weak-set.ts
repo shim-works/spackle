@@ -12,62 +12,153 @@ export const isSupported = (): boolean => {
 /**
  * Spec: https://tc39.es/ecma262/#sec-weakset-objects
  *
+ * A hidden per-set property on each member object, like es.weak-map, so it
+ * needs no WeakMap underneath. Symbol members (CanBeHeldWeakly allows
+ * non-registered ones) go in a side list.
+ *
  * Known limitations:
- * - [incomplete] Constructor does not accept an iterable argument —
- *   new WeakSet([obj1, obj2]) is not supported.
+ * - [incomplete] A frozen / non-extensible object cannot be added: it can't
+ *   take the hidden property.
+ * - [incomplete] Symbol members are held strongly: ES5 can't make them weak.
  */
 // One reused descriptor per island: no allocation per construction.
 const SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
+const MEMBER: PropertyDescriptor = { value: true, writable: true, enumerable: false, configurable: true };
+const hasOwn = Object.prototype.hasOwnProperty;
+const iteratorKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+const arrayIterAtLoad: any = iteratorKey ? (Array.prototype as any)[iteratorKey] : undefined;
+let counter = 0;
+
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+const isRegisteredSymbol = (value: any): boolean => {
+  try {
+    return (Symbol as any).keyFor(value) !== undefined;
+  } catch (e) {
+    return false;
+  }
+};
+// CanBeHeldWeakly: an object, or a symbol that is not in the global registry.
+const canBeHeldWeakly = (value: any): boolean =>
+  isObject(value) || (typeof value === 'symbol' && !isRegisteredSymbol(value));
+
+const requireWeakSet = (self: any, method: string): void => {
+  if (self === null || typeof self !== 'object' || self._wsid === undefined) {
+    throw new TypeError('Method WeakSet.prototype.' + method + ' called on incompatible receiver');
+  }
+};
+const symbolIndex = (self: any, value: any): number => {
+  const list = self._syms;
+  if (list === undefined) return -1;
+  for (let i = 0; i < list.length; i++) if (list[i] === value) return i;
+  return -1;
+};
+const closeIterator = (iterator: any): void => {
+  try {
+    const ret = iterator['return'];
+    if (ret !== undefined && ret !== null) ret.call(iterator);
+  } catch (e) {
+    /* the original error wins */
+  }
+};
 
 export const WeakSet = function (this: any) {
-  // the [incomplete] gap from the header, hit at runtime — say so
-  if (arguments.length > 0 && arguments[0] !== null && arguments[0] !== undefined) {
-    console.warn(
-      '[spackle] WeakSet: the iterable constructor argument is not implemented — starting empty; add() entries individually'
-    );
+  if (!(this instanceof WeakSet)) {
+    throw new TypeError("Constructor WeakSet requires 'new'");
   }
-  if (typeof WeakMap !== 'undefined') {
-    // inlined: slot(this, '_map', ...)
-    SLOT.value = new WeakMap();
-    Object.defineProperty(this, '_map', SLOT);
-    SLOT.value = undefined; // never pin the last value
-  } else {
-    // inlined: slot(this, '_id', ...)
-    SLOT.value = `_ws_${Math.random().toString(36).substring(2)}`;
-    Object.defineProperty(this, '_id', SLOT);
-    SLOT.value = undefined; // never pin the last value
+  counter++;
+  SLOT.value = `__ws$${counter}$${Math.random().toString(36).substring(2)}`;
+  Object.defineProperty(this, '_wsid', SLOT);
+  SLOT.value = undefined; // never pin the last value
+
+  const iterable = arguments.length > 0 ? arguments[0] : undefined;
+  if (iterable === null || iterable === undefined) {
+    return;
+  }
+  // Get(set, "add") for every iterable, even an empty one
+  const adder = this.add;
+  if (typeof adder !== 'function') {
+    throw new TypeError('WeakSet constructor: this.add is not a function');
+  }
+  if (Array.isArray(iterable) && (!iteratorKey || (iterable[iteratorKey] === arrayIterAtLoad && (Array.prototype as any)[iteratorKey] === arrayIterAtLoad))) {
+    for (let i = 0; i < iterable.length; i++) adder.call(this, iterable[i]);
+    return;
+  }
+  const method = iteratorKey ? iterable[iteratorKey] : undefined;
+  if (typeof method !== 'function') {
+    throw new TypeError('WeakSet constructor argument is not iterable');
+  }
+  const iterator = method.call(iterable);
+  if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+  const next = iterator.next;
+  for (;;) {
+    const step = next.call(iterator);
+    if (!isObject(step)) throw new TypeError('Iterator result is not an object');
+    if (step.done) return;
+    const value = step.value;
+    try {
+      adder.call(this, value);
+    } catch (error) {
+      closeIterator(iterator);
+      throw error;
+    }
   }
 } as any;
 
-WeakSet.prototype.add = function (this: any, key: object): any {
-  if (this._map) {
-    this._map.set(key, true);
-  } else {
-    Object.defineProperty(key, this._id, {
-      configurable: true,
-      enumerable: false,
-      value: true,
-      writable: false,
-    });
+WeakSet.prototype.add = function (this: any, value: any): any {
+  requireWeakSet(this, 'add');
+  if (!canBeHeldWeakly(value)) {
+    throw new TypeError('Invalid value used in weak set');
+  }
+  if (typeof value === 'symbol') {
+    if (symbolIndex(this, value) === -1) {
+      if (this._syms === undefined) {
+        SLOT.value = [];
+        Object.defineProperty(this, '_syms', SLOT);
+        SLOT.value = undefined;
+      }
+      this._syms.push(value);
+    }
+    return this;
+  }
+  const id = this._wsid;
+  if (!hasOwn.call(value, id)) {
+    if (!Object.isExtensible(value)) {
+      throw new TypeError('Cannot add a non-extensible object to a WeakSet');
+    }
+    Object.defineProperty(value, id, MEMBER);
   }
   return this;
 };
 
-WeakSet.prototype.has = function (this: any, key: object): boolean {
-  if (this._map) {
-    return this._map.has(key);
-  }
-  return (key as any)[this._id] === true;
+WeakSet.prototype.has = function (this: any, value: any): boolean {
+  requireWeakSet(this, 'has');
+  if (typeof value === 'symbol') return symbolIndex(this, value) !== -1;
+  return isObject(value) && hasOwn.call(value, this._wsid);
 };
 
-WeakSet.prototype.delete = function (this: any, key: object): boolean {
-  if (this._map) {
-    return this._map.delete(key);
-  }
-  if ((key as any)[this._id] === true) {
-    delete (key as any)[this._id];
+WeakSet.prototype.delete = function (this: any, value: any): boolean {
+  requireWeakSet(this, 'delete');
+  if (typeof value === 'symbol') {
+    const at = symbolIndex(this, value);
+    if (at === -1) return false;
+    this._syms.splice(at, 1);
     return true;
   }
-  return false;
+  if (!isObject(value) || !hasOwn.call(value, this._wsid)) return false;
+  delete value[this._wsid];
+  return true;
 };
 
+// Methods non-enumerable, writable and configurable, with their spec names.
+const weakSetMethods = ['add', 'has', 'delete'];
+for (let i = 0; i < weakSetMethods.length; i++) {
+  const fn = (WeakSet.prototype as any)[weakSetMethods[i]];
+  try {
+    Object.defineProperty(fn, 'name', { value: weakSetMethods[i], configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(WeakSet.prototype, weakSetMethods[i], { value: fn, writable: true, enumerable: false, configurable: true });
+}
+if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
+  Object.defineProperty(WeakSet.prototype, (Symbol as any).toStringTag, { value: 'WeakSet', writable: false, enumerable: false, configurable: true });
+}

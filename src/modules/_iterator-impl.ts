@@ -10,8 +10,7 @@
  * callbacks as soon as they finish or are return()ed.
  *
  * Known limitations:
- * - [incomplete] Iterator.prototype[@@toStringTag] and the constructor's
- *   subclass-brand checks are not modelled.
+ * - [incomplete] The constructor's subclass-brand checks are not modelled.
  * - [incomplete] Engines without %IteratorPrototype% (Chrome 38/41) get a
  *   synthesized one, spliced into iterator chains at install time; iterators
  *   created before installPolyfills() keep their original chain.
@@ -25,18 +24,28 @@ const returnSelf = function (this: any) {
   return this;
 };
 
-// %IteratorPrototype% has no global to reach it through on this floor. The only
-// ES5 route is to walk up from a real array iterator.
+// %IteratorPrototype% has no global to reach it through on this floor. The ES5
+// route is to walk up from a real built-in iterator: an array's first, then a
+// string's, a Map's or a Set's (an engine can lack one and still have others).
+// This runs at module evaluation, before any spackle global is installed.
 const getIteratorPrototype = (): any => {
   if (!iteratorSymbol) return undefined;
-  try {
-    const arrayIterator = ([] as any)[iteratorSymbol]();
-    const proto = Object.getPrototypeOf(Object.getPrototypeOf(arrayIterator));
-    if (proto && proto !== Object.prototype) {
-      return proto;
+  const g: any = typeof window !== 'undefined' ? window : globalThis;
+  const samples: Array<() => any> = [
+    function () { return ([] as any)[iteratorSymbol](); },
+    function () { return ('' as any)[iteratorSymbol](); },
+    function () { return new g.Map()[iteratorSymbol](); },
+    function () { return new g.Set()[iteratorSymbol](); },
+  ];
+  for (let i = 0; i < samples.length; i++) {
+    try {
+      const proto = Object.getPrototypeOf(Object.getPrototypeOf(samples[i]()));
+      if (proto && proto !== Object.prototype) {
+        return proto;
+      }
+    } catch {
+      /* that iterator is missing or unusable -- try the next */
     }
-  } catch {
-    /* no usable array iterator -- synthesize below */
   }
 
   /*
@@ -247,6 +256,9 @@ IteratorHelperPrototype.next = function (this: any): any {
       // inlined: callNext(this._next, underlying)
       if (typeof this._next !== "function") throw new TypeError("iterator.next is not a function");
       const step = this._next.call(underlying);
+      if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+        throw new TypeError("iterator result is not an object");
+      }
       if (step.done) {
         // inlined: releaseHelper(this)
         this._underlying = null;
@@ -346,6 +358,20 @@ IteratorHelperPrototype.return = function (this: any): any {
   // inlined: DONE()
   return { value: undefined, done: true };
 };
+
+// next/return non-enumerable like every built-in method, with spec names, and
+// the "Iterator Helper" tag.
+const helperMethods = ["next", "return"];
+for (let i = 0; i < helperMethods.length; i++) {
+  const fn = IteratorHelperPrototype[helperMethods[i]];
+  try {
+    Object.defineProperty(fn, "name", { value: helperMethods[i], configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(IteratorHelperPrototype, helperMethods[i], { value: fn, writable: true, enumerable: false, configurable: true });
+}
+if (typeof Symbol !== "undefined" && (Symbol as any).toStringTag && !Object.prototype.hasOwnProperty.call(IteratorHelperPrototype, (Symbol as any).toStringTag)) {
+  Object.defineProperty(IteratorHelperPrototype, (Symbol as any).toStringTag, { value: "Iterator Helper", writable: false, enumerable: false, configurable: true });
+}
 
 if (iteratorSymbol) {
   Object.defineProperty(IteratorHelperPrototype, iteratorSymbol, {
@@ -456,6 +482,9 @@ export const iteratorToArray = function (this: any) {
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const step = nextMethod.call(underlying);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (step.done) return out;
     out.push(step.value);
   }
@@ -478,9 +507,14 @@ export const iteratorForEach = function (this: any, fn: any) {
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const step = nextMethod.call(underlying);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (step.done) return undefined;
+    // IteratorStepValue: a throwing value getter is a protocol error -- no close
+    const value = step.value;
     try {
-      fn(step.value, index++);
+      fn(value, index++);
     } catch (error) {
       closeIterator(underlying, true);
       throw error;
@@ -488,11 +522,8 @@ export const iteratorForEach = function (this: any, fn: any) {
   }
 };
 
-export const iteratorReduce = function (
-  this: any,
-  reducer: any,
-  initial?: any,
-) {
+// Declared (reducer) only, for the spec length of 1; initialValue comes from arguments.
+export const iteratorReduce = function (this: any, reducer: any) {
   // inlined: assertObjectReceiver(this, "reduce")
   if (this === null || typeof this !== "object") throw new TypeError("Iterator.prototype.reduce called on a non-object");
   // inlined: assertCallableOrClose(this, reducer, "reducer")
@@ -510,21 +541,29 @@ export const iteratorReduce = function (
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const first = nextMethod.call(underlying);
+    if (first === null || (typeof first !== "object" && typeof first !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (first.done) {
       throw new TypeError("Reduce of empty iterator with no initial value");
     }
     accumulator = first.value;
     index = 1;
   } else {
-    accumulator = initial;
+    accumulator = arguments[1];
   }
   for (;;) {
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const step = nextMethod.call(underlying);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (step.done) return accumulator;
+    // IteratorStepValue: a throwing value getter is a protocol error -- no close
+    const value = step.value;
     try {
-      accumulator = reducer(accumulator, step.value, index++);
+      accumulator = reducer(accumulator, value, index++);
     } catch (error) {
       closeIterator(underlying, true);
       throw error;
@@ -549,9 +588,14 @@ export const iteratorSome = function (this: any, predicate: any) {
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const step = nextMethod.call(underlying);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (step.done) return false;
+    // IteratorStepValue: a throwing value getter is a protocol error -- no close
+    const value = step.value;
     try {
-      if (predicate(step.value, index++)) {
+      if (predicate(value, index++)) {
         // short-circuit on a normal completion -- errors from return() propagate
         closeIterator(underlying, false);
         return true;
@@ -580,9 +624,14 @@ export const iteratorEvery = function (this: any, predicate: any) {
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const step = nextMethod.call(underlying);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (step.done) return true;
+    // IteratorStepValue: a throwing value getter is a protocol error -- no close
+    const value = step.value;
     try {
-      if (!predicate(step.value, index++)) {
+      if (!predicate(value, index++)) {
         closeIterator(underlying, false);
         return false;
       }
@@ -610,11 +659,16 @@ export const iteratorFind = function (this: any, predicate: any) {
     // inlined: callNext(nextMethod, underlying)
     if (typeof nextMethod !== "function") throw new TypeError("iterator.next is not a function");
     const step = nextMethod.call(underlying);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+      throw new TypeError("iterator result is not an object");
+    }
     if (step.done) return undefined;
+    // IteratorStepValue: a throwing value getter is a protocol error -- no close
+    const value = step.value;
     try {
-      if (predicate(step.value, index++)) {
+      if (predicate(value, index++)) {
         closeIterator(underlying, false);
-        return step.value;
+        return value;
       }
     } catch (error) {
       closeIterator(underlying, true);
@@ -625,16 +679,23 @@ export const iteratorFind = function (this: any, predicate: any) {
 
 /**
  * Spec: https://tc39.es/proposal-iterator-sequencing/
- * Iterator.concat(...iterables) — a static, unlike the rest.
+ * Iterator.concat(...items) — a static, unlike the rest. Every argument is
+ * validated and its @@iterator read up front, in order; each is opened only
+ * when the previous one is exhausted.
  */
-export const iteratorConcat = function (): any {
+export const iteratorConcat = function concat(): any {
+  // [openMethod, iterable] pairs, flat
   const sources: any[] = [];
   for (let i = 0; i < arguments.length; i++) {
-    const source = arguments[i];
-    if (source === null || typeof source !== "object") {
+    const item = arguments[i];
+    if (item === null || (typeof item !== "object" && typeof item !== "function")) {
       throw new TypeError("Iterator.concat arguments must be objects");
     }
-    sources.push(source);
+    const method = iteratorSymbol ? item[iteratorSymbol] : undefined;
+    if (typeof method !== "function") {
+      throw new TypeError("Iterator.concat argument is not iterable");
+    }
+    sources.push(method, item);
   }
   let cursor = 0;
   // concat walks its sources with its own minimal iterator.
@@ -648,21 +709,29 @@ export const iteratorConcat = function (): any {
             // inlined: DONE()
             return { value: undefined, done: true };
           }
-          const source = sources[cursor];
-          // release it as soon as it is opened -- a consumed source must not
-          // stay reachable for the life of the concat
-          sources[cursor++] = null;
-          current =
-            iteratorSymbol && typeof source[iteratorSymbol] === "function"
-              ? source[iteratorSymbol]()
-              : source;
-          // inlined: getNextMethod(current)
+          const method = sources[cursor];
+          const iterable = sources[cursor + 1];
+          // release them as soon as they are opened -- a consumed source must
+          // not stay reachable for the life of the concat
+          sources[cursor] = null;
+          sources[cursor + 1] = null;
+          cursor += 2;
+          const opened = method.call(iterable);
+          if (opened === null || (typeof opened !== "object" && typeof opened !== "function")) {
+            throw new TypeError("Iterator.concat: @@iterator returned a non-object");
+          }
+          current = opened;
+          // GetIteratorDirect reads next once
           currentNext = current.next;
         }
         // inlined: callNext(currentNext, current)
         if (typeof currentNext !== "function") throw new TypeError("iterator.next is not a function");
         const step = currentNext.call(current);
+        if (step === null || (typeof step !== "object" && typeof step !== "function")) {
+          throw new TypeError("iterator result is not an object");
+        }
         if (!step.done) {
+          // a fresh result object, never the inner one
           return { value: step.value, done: false };
         }
         // drop both -- keeping currentNext would retain a method from the
@@ -684,28 +753,75 @@ export const iteratorConcat = function (): any {
   return makeHelper(driver, "concat", null, 0);
 };
 
-/** Spec: https://tc39.es/ecma262/#sec-iterator.from */
-export const iteratorFrom = function (source: any): any {
-  if (typeof source === "string") {
-    if (!iteratorSymbol) {
-      throw new TypeError("Iterator.from requires Symbol.iterator");
+/*
+ * %WrapForValidIteratorPrototype%: what Iterator.from returns for an iterator
+ * that does not already inherit from Iterator.prototype. next() forwards to the
+ * saved next method; return() forwards to the base's return, if any.
+ */
+const WrapForValidIteratorPrototype: any = IteratorPrototype
+  ? Object.create(IteratorPrototype)
+  : Object.create(Object.prototype);
+const hasOwnSlot = Object.prototype.hasOwnProperty;
+const requireWrapper = (self: any, method: string): void => {
+  if (self === null || typeof self !== "object" || !hasOwnSlot.call(self, "_iterated")) {
+    throw new TypeError("%WrapForValidIteratorPrototype%." + method + " called on incompatible receiver");
+  }
+};
+const wrapperMethods: any = {
+  next: function next(this: any): any {
+    requireWrapper(this, "next");
+    return this._nextMethod.call(this._iterated);
+  },
+  return: function (this: any): any {
+    requireWrapper(this, "return");
+    const iterator = this._iterated;
+    const ret = iterator["return"];
+    if (ret === undefined || ret === null) {
+      return { value: undefined, done: true };
     }
-    return makeHelper((source as any)[iteratorSymbol](), "concat", null, 0);
+    return ret.call(iterator);
+  },
+};
+for (const name in wrapperMethods) {
+  try {
+    Object.defineProperty(wrapperMethods[name], "name", { value: name, configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(WrapForValidIteratorPrototype, name, { value: wrapperMethods[name], writable: true, enumerable: false, configurable: true });
+}
+const WRAP_SLOT: PropertyDescriptor = { value: undefined, writable: false, enumerable: false, configurable: false };
+
+/** Spec: https://tc39.es/ecma262/#sec-iterator.from */
+export const iteratorFrom = function from(O: any): any {
+  // GetIteratorFlattenable(O, iterate-string-primitives)
+  if (O === null || (typeof O !== "object" && typeof O !== "function")) {
+    if (typeof O !== "string") {
+      throw new TypeError("Iterator.from called on a non-object");
+    }
   }
-  if (source === null || typeof source !== "object") {
-    throw new TypeError("Iterator.from called on a non-object");
+  const method = iteratorSymbol ? O[iteratorSymbol] : undefined;
+  let iterator: any;
+  if (method === undefined || method === null) {
+    iterator = O;
+  } else {
+    if (typeof method !== "function") throw new TypeError("Iterator.from: @@iterator is not a function");
+    iterator = method.call(O);
   }
-  const iterator =
-    iteratorSymbol && typeof source[iteratorSymbol] === "function"
-      ? source[iteratorSymbol]()
-      : source;
-  if (typeof iterator.next !== "function") {
-    throw new TypeError("Iterator.from argument is not iterable");
+  if (iterator === null || (typeof iterator !== "object" && typeof iterator !== "function")) {
+    throw new TypeError("Iterator.from: the iterator is not an object");
   }
+  // GetIteratorDirect: next read exactly once, before anything else
+  const nextMethod = iterator.next;
+  // OrdinaryHasInstance(%Iterator%, iterator): already an Iterator, hand it back
   if (IteratorPrototype && IteratorPrototype.isPrototypeOf(iterator)) {
     return iterator;
   }
-  return makeHelper(iterator, "concat", null, 0);
+  const wrapper = Object.create(WrapForValidIteratorPrototype);
+  WRAP_SLOT.value = iterator;
+  Object.defineProperty(wrapper, "_iterated", WRAP_SLOT);
+  WRAP_SLOT.value = nextMethod;
+  Object.defineProperty(wrapper, "_nextMethod", WRAP_SLOT);
+  WRAP_SLOT.value = undefined;
+  return wrapper;
 };
 
 /**
@@ -877,7 +993,14 @@ const installIteratorExtensionsOnNative = (): void => {
     function () { return new g.Uint8Array(1).values(); },
     function () { return ('a' as any).matchAll(/a/g); },
     function () { return g.document.createElement('div').childNodes.values(); },
+    function () { return new g.URLSearchParams('a=1').entries(); },
   ];
+  // core-js's iterator-define tags each native iterator prototype in the same
+  // pass that re-parents it. One tag per source above, in the same order.
+  const tags = ['Array Iterator', 'Array Iterator', 'Array Iterator', 'Array Iterator',
+    'String Iterator', 'Map Iterator', 'Set Iterator', 'Array Iterator',
+    'RegExp String Iterator', 'Array Iterator', 'URLSearchParams Iterator'];
+  const tagKey = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
 
   for (let i = 0; i < sources.length; i++) {
     const proto = protoOfSample(sources[i]);
@@ -890,6 +1013,13 @@ const installIteratorExtensionsOnNative = (): void => {
     if (proto === Object.prototype || inheritsFrom(IteratorPrototype, proto)) {
       continue;
     }
+    // Before the "already connected" skip: a native chain that is fine can still
+    // lack its tag (Chrome 41).
+    if (tagKey && !Object.prototype.hasOwnProperty.call(proto, tagKey)) {
+      try {
+        Object.defineProperty(proto, tagKey, { value: tags[i], writable: false, enumerable: false, configurable: true });
+      } catch (e) { /* locked-down prototype: leave it untagged */ }
+    }
     // Already connected -- a native chain on a modern engine, or a prototype an
     // earlier source in this list already spliced.
     if (inheritsFrom(proto, IteratorPrototype)) {
@@ -900,13 +1030,47 @@ const installIteratorExtensionsOnNative = (): void => {
 };
 
 const installIteratorPolyfill = (): void => {
+  // core-js's es.iterator.constructor: whenever %IteratorPrototype% has no own
+  // @@toStringTag, add it as the spec's accessor
+  // (SetterThatIgnoresPrototypeProperties), whether or not Iterator is native.
+  const tagKey = typeof Symbol !== "undefined" ? (Symbol as any).toStringTag : undefined;
+  if (IteratorPrototype && tagKey && !Object.prototype.hasOwnProperty.call(IteratorPrototype, tagKey)) {
+    try {
+      const getTag = function (): string {
+        return "Iterator";
+      };
+      const setTag = function (this: any, v: any): void {
+        if (this === null || (typeof this !== "object" && typeof this !== "function")) {
+          throw new TypeError("Iterator.prototype[@@toStringTag] setter called on a non-object");
+        }
+        if (this === IteratorPrototype) {
+          throw new TypeError("Cannot assign to read only property 'Symbol(Symbol.toStringTag)' of #<Iterator>");
+        }
+        if (Object.prototype.hasOwnProperty.call(this, tagKey)) {
+          this[tagKey] = v;
+        } else {
+          Object.defineProperty(this, tagKey, { value: v, writable: true, enumerable: true, configurable: true });
+        }
+      };
+      try { Object.defineProperty(getTag, "name", { value: "get [Symbol.toStringTag]", configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+      try { Object.defineProperty(setTag, "name", { value: "set [Symbol.toStringTag]", configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+      Object.defineProperty(IteratorPrototype, tagKey, { get: getTag, set: setTag, enumerable: false, configurable: true });
+    } catch (e) {
+      /* frozen %IteratorPrototype%: leave it untagged */
+    }
+  }
   if (!isSupported() && IteratorPrototype) {
+    // Abstract: callable only as a subclass's super (NewTarget is not Iterator).
     const Iterator = function (this: any) {
-      if (this === undefined || this === null) {
+      if (this === undefined || this === null || typeof this !== "object") {
         throw new TypeError("Constructor Iterator requires 'new'");
       }
+      if (Object.getPrototypeOf(this) === IteratorPrototype) {
+        throw new TypeError("Abstract class Iterator not directly constructable");
+      }
     } as any;
-    Iterator.prototype = IteratorPrototype;
+    // Iterator.prototype: { writable: false, enumerable: false, configurable: false }
+    Object.defineProperty(Iterator, "prototype", { value: IteratorPrototype, writable: false, enumerable: false, configurable: false });
     try {
       // Spec: %IteratorPrototype%.constructor is an accessor
       // (SetterThatIgnoresPrototypeProperties): assignment shadows onto subclasses,
@@ -916,7 +1080,8 @@ const installIteratorPolyfill = (): void => {
           return Iterator;
         },
         set: function (this: any, v: any): void {
-          if (this === null || typeof this !== "object") {
+          // Functions are objects too (spec: "not an Object", core-js anObject).
+          if (this === null || (typeof this !== "object" && typeof this !== "function")) {
             throw new TypeError(
               "Iterator.prototype.constructor setter called on a non-object",
             );
@@ -926,8 +1091,8 @@ const installIteratorPolyfill = (): void => {
               "Cannot assign to read only property 'constructor' of #<Iterator>",
             );
           }
-          const desc = Object.getOwnPropertyDescriptor(this, "constructor");
-          if (desc === undefined) {
+          // hasOwnProperty, not getOwnPropertyDescriptor: no descriptor allocated.
+          if (!Object.prototype.hasOwnProperty.call(this, "constructor")) {
             Object.defineProperty(this, "constructor", {
               value: v,
               writable: true,
@@ -949,8 +1114,15 @@ const installIteratorPolyfill = (): void => {
       /* frozen %IteratorPrototype% -- the methods below still install */
     }
 
-    Iterator.from = iteratorFrom;
-    Iterator.concat = iteratorConcat;
+    // statics: non-enumerable, writable, configurable, with spec names
+    const statics: [string, Function][] = [["from", iteratorFrom], ["concat", iteratorConcat]];
+    for (let i = 0; i < statics.length; i++) {
+      try {
+        Object.defineProperty(statics[i][1], "name", { value: statics[i][0], configurable: true });
+      } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+      Object.defineProperty(Iterator, statics[i][0], { value: statics[i][1], writable: true, enumerable: false, configurable: true });
+      Object.defineProperty(statics[i][1], "__polyfilled", { value: true });
+    }
 
     const methods: [string, Function][] = [
       ["map", iteratorMap],
@@ -974,15 +1146,6 @@ const installIteratorPolyfill = (): void => {
             configurable: true,
           });
         } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-        if (name === "reduce") {
-          // Iterator.prototype.reduce.length is 1 per spec.
-          try {
-            Object.defineProperty(methods[i][1], "length", {
-              value: 1,
-              configurable: true,
-            });
-          } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-        }
         Object.defineProperty(IteratorPrototype as any, name, {
           value: methods[i][1],
           writable: true,

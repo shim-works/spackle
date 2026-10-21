@@ -34,10 +34,9 @@ export const isSupported = (): boolean => {
  * Storage is a flat list of [name, value] pairs in insertion order, as the spec
  * describes: repeated keys stay interleaved, and `__proto__` is just a name.
  *
- * Known limitations:
- * - [incomplete] Missing entries(), keys(), values() iterators.
- * - [incomplete] Missing [Symbol.iterator].
- * - [incomplete] Missing sort() method.
+ * Arguments go through WebIDL's conversions: USVString (lone surrogates become
+ * U+FFFD), sequence<sequence<USVString>> for iterables, record<USVString,
+ * USVString> for other objects.
  */
 
 // Only text that contains a '%' comes here -- the '+' and no-'%' fast path is
@@ -169,110 +168,196 @@ const parseString = (search: string): [string, string][] => {
 
 // One reused descriptor per island: no allocation per construction.
 const SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
+const hasOwn = Object.prototype.hasOwnProperty;
+const isEnumerable = Object.prototype.propertyIsEnumerable;
+const iteratorKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
 
-export const URLSearchParams = function (
-  this: any,
-  search?: string | Record<string, string> | [string, string][]
-) {
+// WebIDL USVString: ToString (a Symbol throws), then lone surrogates -> U+FFFD.
+const toUSVString = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const str = typeof value === 'string' ? value : String(value);
+  let out: string | null = null;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdfff) {
+      const next = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
+      if (c <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+        if (out !== null) out += str.charAt(i) + str.charAt(i + 1);
+        i++;
+        continue;
+      }
+      if (out === null) out = str.substring(0, i);
+      out += '�';
+    } else if (out !== null) {
+      out += str.charAt(i);
+    }
+  }
+  return out === null ? str : out;
+};
+
+const requireParams = (self: any, method: string): void => {
+  if (self === null || typeof self !== 'object' || !hasOwn.call(self, '_pairs')) {
+    throw new TypeError("Failed to execute '" + method + "' on 'URLSearchParams': Illegal invocation");
+  }
+};
+const requireArgs = (count: number, needed: number, method: string): void => {
+  if (count < needed) {
+    throw new TypeError("Failed to execute '" + method + "' on 'URLSearchParams': " + needed + ' argument' + (needed > 1 ? 's' : '') + ' required, but only ' + count + ' present.');
+  }
+};
+
+// WebIDL sequence<USVString> for one init entry: the inner value's own
+// iterator (arrays included), exactly two items.
+const toPair = (entry: any): [string, string] => {
+  if (entry === null || (typeof entry !== 'object' && typeof entry !== 'function')) {
+    throw new TypeError("Failed to construct 'URLSearchParams': The provided value cannot be converted to a sequence.");
+  }
+  const items: any[] = [];
+  const method = iteratorKey ? entry[iteratorKey] : undefined;
+  if (typeof method === 'function') {
+    const iterator = method.call(entry);
+    const next = iterator.next;
+    for (let step = next.call(iterator); !step.done; step = next.call(iterator)) items.push(step.value);
+  } else if (!iteratorKey && typeof entry.length === 'number') {
+    for (let i = 0; i < entry.length; i++) items.push(entry[i]);
+  } else {
+    throw new TypeError("Failed to construct 'URLSearchParams': The provided value cannot be converted to a sequence.");
+  }
+  if (items.length !== 2) {
+    throw new TypeError("Failed to construct 'URLSearchParams': Each sequence element must contain exactly two items");
+  }
+  return [toUSVString(items[0]), toUSVString(items[1])];
+};
+
+export const URLSearchParams = function (this: any) {
+  if (!(this instanceof (URLSearchParams as any))) {
+    throw new TypeError("Failed to construct 'URLSearchParams': Please use the 'new' operator.");
+  }
   // Non-enumerable, like a native slot.
-  // inlined: slot(this, '_pairs', ...)
   SLOT.value = [];
   Object.defineProperty(this, '_pairs', SLOT);
   SLOT.value = undefined; // never pin the last value
 
-  if (search === null || search === undefined || search === '') {
+  const init = arguments.length > 0 ? arguments[0] : undefined;
+  if (init === undefined || init === null) {
+    if (init === null) this._pairs = parseString('null');
     return;
   }
+  const pairs = this._pairs;
 
-  if (typeof search === 'string') {
-    this._pairs = parseString(search);
-    return;
-  }
-
-  // Another URLSearchParams (this polyfill): copy its list. Its state is
-  // non-enumerable, so the record branch below would copy nothing.
-  if (search instanceof (URLSearchParams as any)) {
-    const source = (search as any)._pairs;
-    for (let i = 0; i < source.length; i++) {
-      this._pairs.push([source[i][0], source[i][1]]);
+  if (typeof init === 'object' || typeof init === 'function') {
+    // Another URLSearchParams from this module: copy its list.
+    if (hasOwn.call(init, '_pairs') && init instanceof (URLSearchParams as any) && init[iteratorKey] === (URLSearchParams as any).prototype.entries) {
+      const source = init._pairs;
+      for (let i = 0; i < source.length; i++) pairs.push([source[i][0], source[i][1]]);
+      return;
     }
-    return;
-  }
-
-  // Any other iterable (spec: an object with @@iterator is a sequence of
-  // pairs) -- a native URLSearchParams, a Map, a generator. Each pair must be
-  // exactly two items.
-  const iteratorKey = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
-  if (iteratorKey && !Array.isArray(search) && typeof (search as any)[iteratorKey] === 'function') {
-    const iterator = (search as any)[iteratorKey]();
-    for (let step = iterator.next(); !step.done; step = iterator.next()) {
-      const entry = step.value;
-      if (entry === null || typeof entry !== 'object' || Math.floor(+entry.length) !== 2 /* inlined: toLength; only 2 passes */) {
-        throw new TypeError(
-          "Failed to construct 'URLSearchParams': Each sequence element must contain exactly two items"
-        );
+    // sequence<sequence<USVString>>: any object with an @@iterator method
+    const method = iteratorKey ? init[iteratorKey] : undefined;
+    if (method !== undefined && method !== null) {
+      if (typeof method !== 'function') throw new TypeError("Failed to construct 'URLSearchParams': @@iterator is not callable");
+      const iterator = method.call(init);
+      const next = iterator.next;
+      for (let step = next.call(iterator); !step.done; step = next.call(iterator)) pairs.push(toPair(step.value));
+      return;
+    }
+    if (!iteratorKey && Array.isArray(init)) {
+      for (let i = 0; i < init.length; i++) pairs.push(toPair(init[i]));
+      return;
+    }
+    // record<USVString, USVString>: own enumerable keys in order; a converted
+    // key seen twice keeps its first position and takes the later value
+    const keys = Object.getOwnPropertyNames(init);
+    for (let k = 0; k < keys.length; k++) {
+      const key = keys[k];
+      if (!isEnumerable.call(init, key)) continue;
+      const name = toUSVString(key);
+      const value = toUSVString(init[key]);
+      let replaced = false;
+      for (let i = 0; i < pairs.length; i++) {
+        if (pairs[i][0] === name) {
+          pairs[i][1] = value;
+          replaced = true;
+          break;
+        }
       }
-      this._pairs.push([String(entry[0]), String(entry[1])]);
+      if (!replaced) pairs.push([name, value]);
     }
-    return;
-  }
-
-  // sequence of [name, value] pairs
-  if (Array.isArray(search)) {
-    for (let i = 0; i < search.length; i++) {
-      const entry = search[i];
-      if (!entry || entry.length !== 2) {
-        throw new TypeError(
-          "Failed to construct 'URLSearchParams': Each sequence element must contain exactly two items"
-        );
+    if (typeof Object.getOwnPropertySymbols === 'function') {
+      const symbols = Object.getOwnPropertySymbols(init);
+      for (let k = 0; k < symbols.length; k++) {
+        // a Symbol key cannot become a USVString
+        if (isEnumerable.call(init, symbols[k])) toUSVString(symbols[k]);
       }
-      this._pairs.push([String(entry[0]), String(entry[1])]);
     }
     return;
   }
-
-  // record<string, string>
-  for (const key in search as Record<string, string>) {
-    if (Object.prototype.hasOwnProperty.call(search, key)) {
-      this._pairs.push([key, String((search as Record<string, string>)[key])]);
-    }
-  }
+  // USVString init: an optional leading '?' is dropped, then parsed
+  this._pairs = parseString(toUSVString(init));
 } as any;
 
-URLSearchParams.prototype.get = function (name: string): string | null {
-  const key = String(name);
+const P: any = URLSearchParams.prototype;
+
+P.append = function append(this: any, name: any, value: any): void {
+  requireParams(this, 'append');
+  requireArgs(arguments.length, 2, 'append');
+  this._pairs.push([toUSVString(name), toUSVString(value)]);
+  updateSteps(this);
+};
+
+P['delete'] = function (this: any, name: any): void {
+  requireParams(this, 'delete');
+  requireArgs(arguments.length, 1, 'delete');
+  const key = toUSVString(name);
+  const value = arguments.length > 1 && arguments[1] !== undefined ? toUSVString(arguments[1]) : undefined;
+  const kept: [string, string][] = [];
   for (let i = 0; i < this._pairs.length; i++) {
-    if (this._pairs[i][0] === key) {
-      return this._pairs[i][1];
-    }
+    const pair = this._pairs[i];
+    if (pair[0] !== key || (value !== undefined && pair[1] !== value)) kept.push(pair);
+  }
+  // in place, so a live iterator keeps walking the same list
+  this._pairs.length = 0;
+  for (let i = 0; i < kept.length; i++) this._pairs.push(kept[i]);
+  updateSteps(this);
+};
+
+P.get = function get(this: any, name: any): string | null {
+  requireParams(this, 'get');
+  requireArgs(arguments.length, 1, 'get');
+  const key = toUSVString(name);
+  for (let i = 0; i < this._pairs.length; i++) {
+    if (this._pairs[i][0] === key) return this._pairs[i][1];
   }
   return null;
 };
 
-URLSearchParams.prototype.getAll = function (name: string): string[] {
-  const key = String(name);
+P.getAll = function getAll(this: any, name: any): string[] {
+  requireParams(this, 'getAll');
+  requireArgs(arguments.length, 1, 'getAll');
+  const key = toUSVString(name);
   const values: string[] = [];
   for (let i = 0; i < this._pairs.length; i++) {
-    if (this._pairs[i][0] === key) {
-      values.push(this._pairs[i][1]);
-    }
+    if (this._pairs[i][0] === key) values.push(this._pairs[i][1]);
   }
   return values;
 };
 
-URLSearchParams.prototype.has = function (name: string): boolean {
-  const key = String(name);
+P.has = function has(this: any, name: any): boolean {
+  requireParams(this, 'has');
+  requireArgs(arguments.length, 1, 'has');
+  const key = toUSVString(name);
+  const value = arguments.length > 1 && arguments[1] !== undefined ? toUSVString(arguments[1]) : undefined;
   for (let i = 0; i < this._pairs.length; i++) {
-    if (this._pairs[i][0] === key) {
-      return true;
-    }
+    if (this._pairs[i][0] === key && (value === undefined || this._pairs[i][1] === value)) return true;
   }
   return false;
 };
 
-URLSearchParams.prototype.set = function (name: string, value: string): void {
-  const key = String(name);
-  const next = String(value);
+P.set = function set(this: any, name: any, value: any): void {
+  requireParams(this, 'set');
+  requireArgs(arguments.length, 2, 'set');
+  const key = toUSVString(name);
+  const next = toUSVString(value);
   let replaced = false;
   // spec: overwrite the FIRST match in place (keeping its position), drop the rest
   const kept: [string, string][] = [];
@@ -284,52 +369,181 @@ URLSearchParams.prototype.set = function (name: string, value: string): void {
       replaced = true;
     }
   }
-  if (!replaced) {
-    kept.push([key, next]);
-  }
-  this._pairs = kept;
+  if (!replaced) kept.push([key, next]);
+  this._pairs.length = 0;
+  for (let i = 0; i < kept.length; i++) this._pairs.push(kept[i]);
+  updateSteps(this);
 };
 
-URLSearchParams.prototype.append = function (name: string, value: string): void {
-  this._pairs.push([String(name), String(value)]);
-};
-
-URLSearchParams.prototype['delete'] = function (name: string): void {
-  const key = String(name);
-  const kept: [string, string][] = [];
-  for (let i = 0; i < this._pairs.length; i++) {
-    if (this._pairs[i][0] !== key) {
-      kept.push(this._pairs[i]);
+// Stable sort by name, comparing UTF-16 code units (the spec's order).
+P.sort = function sort(this: any): void {
+  requireParams(this, 'sort');
+  const list = this._pairs;
+  for (let i = 1; i < list.length; i++) {
+    const pair = list[i];
+    let j = i - 1;
+    while (j >= 0 && list[j][0] > pair[0]) {
+      list[j + 1] = list[j];
+      j--;
     }
+    list[j + 1] = pair;
   }
-  this._pairs = kept;
+  updateSteps(this);
 };
 
-Object.defineProperty(URLSearchParams.prototype, 'toString', {
-  writable: true, enumerable: false, configurable: true,
-  value: function (): string {
-    // inlined: encode(name), encode(value) -- built as one string
-    let out = '';
-    for (let i = 0; i < this._pairs.length; i++) {
-      if (i > 0) out += '&';
-      out +=
-        encodeURIComponent(this._pairs[i][0]).replace(/%20/g, '+') + '=' +
-        encodeURIComponent(this._pairs[i][1]).replace(/%20/g, '+');
-    }
-    return out;
+// application/x-www-form-urlencoded serializer: everything but ASCII
+// alphanumerics and *-._ is percent-encoded (UTF-8), and space becomes '+'.
+const formEncode = (value: string): string =>
+  encodeURIComponent(value)
+    // \x27 is the apostrophe (a literal one confuses the ES5 bundle checker)
+    .replace(/[!\x27()~]/g, function (c: string) {
+      return '%' + c.charCodeAt(0).toString(16).toUpperCase();
+    })
+    .replace(/%20/g, '+');
+
+const serializePairs = (pairs: [string, string][]): string => {
+  let out = '';
+  for (let i = 0; i < pairs.length; i++) {
+    if (i > 0) out += '&';
+    out += formEncode(pairs[i][0]) + '=' + formEncode(pairs[i][1]);
+  }
+  return out;
+};
+
+/*
+ * URLSearchParams update steps. web.url hangs its URL record on `_url` (a hidden
+ * slot, set only on a URL's own params): every mutation writes the query back,
+ * with an empty list meaning no query at all.
+ */
+const updateSteps = (self: any): void => {
+  const record = self._url;
+  if (record === undefined || record === null) return;
+  const query = serializePairs(self._pairs);
+  record.query = query === '' ? null : query;
+  // potentially strip trailing spaces from an opaque path
+  if (record.query === null && record.fragment === null && typeof record.path === 'string') {
+    record.path = record.path.replace(/ +$/, '');
+  }
+};
+
+Object.defineProperty(P, 'toString', {
+  writable: true,
+  enumerable: true,
+  configurable: true,
+  value: function toString(this: any): string {
+    requireParams(this, 'toString');
+    return serializePairs(this._pairs);
   },
 });
 
-URLSearchParams.prototype.forEach = function (
-  callback: (value: string, key: string, parent: any) => void,
-  thisArg?: any
-): void {
-  // snapshot the length up front so an append during iteration can't loop
-  // forever, matching how the spec's ordered-list iteration behaves
+P.forEach = function forEach(this: any, callback: any): void {
+  requireParams(this, 'forEach');
+  requireArgs(arguments.length, 1, 'forEach');
+  if (typeof callback !== 'function') {
+    throw new TypeError("Failed to execute 'forEach' on 'URLSearchParams': The callback provided as parameter 1 is not a function.");
+  }
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  // the list is live: entries added or removed during iteration are seen
   for (let i = 0; i < this._pairs.length; i++) {
-    callback.call(thisArg, this._pairs[i][1], this._pairs[i][0], this);
+    const pair = this._pairs[i];
+    callback.call(thisArg, pair[1], pair[0], this);
   }
 };
+
+Object.defineProperty(P, 'size', {
+  enumerable: true,
+  configurable: true,
+  get: function (this: any): number {
+    requireParams(this, 'size');
+    return this._pairs.length;
+  },
+});
+try {
+  Object.defineProperty(Object.getOwnPropertyDescriptor(P, 'size')!.get!, 'name', { value: 'get size', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+
+// WebIDL pair iterator: walks the live list by index.
+const IteratorPrototype: any = (function () {
+  try {
+    return iteratorKey ? Object.getPrototypeOf(Object.getPrototypeOf(([] as any)[iteratorKey]())) : Object.prototype;
+  } catch (e) {
+    return Object.prototype;
+  }
+})();
+const ParamsIteratorPrototype: any = Object.create(IteratorPrototype);
+const ITER_SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: false };
+Object.defineProperty(ParamsIteratorPrototype, 'next', {
+  writable: true,
+  enumerable: true,
+  configurable: true,
+  value: function next(this: any): any {
+    if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_params')) {
+      throw new TypeError("Failed to execute 'next' on 'URLSearchParams Iterator': Illegal invocation");
+    }
+    const params = this._params;
+    if (params === null || this._index >= params._pairs.length) {
+      this._params = null;
+      return { value: undefined, done: true };
+    }
+    const pair = params._pairs[this._index++];
+    const kind = this._kind;
+    return { value: kind === 0 ? pair[0] : kind === 1 ? pair[1] : [pair[0], pair[1]], done: false };
+  },
+});
+if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
+  Object.defineProperty(ParamsIteratorPrototype, (Symbol as any).toStringTag, { value: 'URLSearchParams Iterator', writable: false, enumerable: false, configurable: true });
+}
+// Iterable itself, so [...params.entries()] and Array.from(params.keys()) work.
+// Chrome 38/41 have no %IteratorPrototype% to inherit this from (until
+// _iterator-impl splices one in), so add it unless it is already inherited.
+if (iteratorKey && typeof ParamsIteratorPrototype[iteratorKey] !== 'function') {
+  Object.defineProperty(ParamsIteratorPrototype, iteratorKey, {
+    value: function (this: any) {
+      return this;
+    },
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+}
+const makeIterator = (params: any, kind: number): any => {
+  const iterator = Object.create(ParamsIteratorPrototype);
+  ITER_SLOT.value = params;
+  Object.defineProperty(iterator, '_params', ITER_SLOT);
+  ITER_SLOT.value = 0;
+  Object.defineProperty(iterator, '_index', ITER_SLOT);
+  ITER_SLOT.value = kind;
+  Object.defineProperty(iterator, '_kind', ITER_SLOT);
+  ITER_SLOT.value = undefined;
+  return iterator;
+};
+
+P.keys = function keys(this: any): any {
+  requireParams(this, 'keys');
+  return makeIterator(this, 0);
+};
+P.values = function values(this: any): any {
+  requireParams(this, 'values');
+  return makeIterator(this, 1);
+};
+P.entries = function entries(this: any): any {
+  requireParams(this, 'entries');
+  return makeIterator(this, 2);
+};
+// spec names (the bundler may rename function expressions; delete is anonymous)
+const paramMethods = ['append', 'delete', 'get', 'getAll', 'has', 'set', 'sort', 'toString', 'forEach', 'keys', 'values', 'entries'];
+for (let i = 0; i < paramMethods.length; i++) {
+  try {
+    Object.defineProperty(P[paramMethods[i]], 'name', { value: paramMethods[i], configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+}
+
+if (iteratorKey) {
+  Object.defineProperty(P, iteratorKey, { value: P.entries, writable: true, enumerable: false, configurable: true });
+}
+if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
+  Object.defineProperty(P, (Symbol as any).toStringTag, { value: 'URLSearchParams', writable: false, enumerable: false, configurable: true });
+}
 
 // Self-installs on import: other islands capture this constructor at module scope.
 export const install = (): void => {

@@ -116,9 +116,14 @@ describe('RegExp.prototype.test', () => {
 });
 
 describe('RegExp.prototype.dotAll', () => {
-  it('reads the s flag off .flags', () => {
-    expect(regexpDotAllGetter.call({ flags: 'gs' })).toBe(true);
-    expect(regexpDotAllGetter.call({ flags: 'gi' })).toBe(false);
+  // test262 dotAll/this-val-non-regexp.js, this-val-regexp-prototype.js
+  it('rejects non-RegExps and is undefined on RegExp.prototype', () => {
+    expect(() => regexpDotAllGetter.call({ flags: 'gs' })).toThrow(TypeError);
+    expect(regexpDotAllGetter.call(RegExp.prototype)).toBeUndefined();
+  });
+
+  it('is false for a real RegExp (it only runs where the s flag cannot be set)', () => {
+    expect(regexpDotAllGetter.call(/a/gi)).toBe(false);
   });
 
   it('throws on a non-object receiver', () => {

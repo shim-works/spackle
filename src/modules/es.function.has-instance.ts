@@ -49,10 +49,17 @@ export const functionHasInstance = function (this: any, value: any): boolean {
 
 export const install = (): void => {
   if (hasInstanceKey) {
-    Object.defineProperty(Function.prototype, hasInstanceKey, {
-      configurable: true,
-      value: functionHasInstance,
-    });
+    // spec attributes: { writable: false, enumerable: false, configurable: false }
+    try {
+      Object.defineProperty(Function.prototype, hasInstanceKey, {
+        value: functionHasInstance,
+        writable: false,
+        enumerable: false,
+        configurable: false,
+      });
+    } catch (e) {
+      /* already installed non-configurable by an earlier run */
+    }
     try { Object.defineProperty(functionHasInstance, 'name', { value: '[Symbol.hasInstance]', configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
     Object.defineProperty((functionHasInstance as any), '__polyfilled', { value: true });
   }

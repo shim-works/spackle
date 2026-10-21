@@ -120,3 +120,15 @@ describe('String.prototype.replaceAll — test262 conformance', () => {
     });
   });
 });
+
+describe('String.prototype.replaceAll — a RegExp with @@replace shadowed to undefined', () => {
+  it('searches for the RegExp\'s string form, as the spec says', () => {
+    const plain: any = /./g;
+    Object.defineProperty(plain, Symbol.replace, { value: undefined });
+    expect(stringReplaceAll.call('aa /./g /./g aa', plain, 'z')).toBe('aa z z aa');
+  });
+
+  it('still replaces a normal global RegExp as a RegExp', () => {
+    expect(stringReplaceAll.call('a.b', /[.]/g, '-')).toBe('a-b');
+  });
+});

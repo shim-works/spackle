@@ -44,3 +44,38 @@ describe('DOMException — polyfill vs native', () => {
     expect(polyfill.code).toBe(0);
   });
 });
+
+// webidl/ecmascript-binding/es-exceptions, as spackle-verify ports them
+describe('DOMException polyfill — WebIDL shape', () => {
+  const D: any = DOMExceptionPolyfill;
+
+  it('keeps name, message and code in slots behind prototype getters', () => {
+    const e = new D();
+    expect([e.name, e.message, e.hasOwnProperty('name'), e.hasOwnProperty('message'), e.hasOwnProperty('code')]).toEqual(['Error', '', false, false, false]);
+    for (const key of ['name', 'message', 'code']) {
+      const d = Object.getOwnPropertyDescriptor(D.prototype, key)!;
+      expect([typeof d.get, d.set, d.enumerable, d.configurable]).toEqual(['function', undefined, true, true]);
+      expect(() => d.get!.call({})).toThrow(TypeError);
+    }
+  });
+
+  it('converts arguments with ToString, defaulting only undefined', () => {
+    expect([new D(null).message, new D(undefined).message, new D('foo').name, new D('bar', undefined).name, new D('m', '').name]).toEqual(['null', '', 'Error', 'Error', '']);
+  });
+
+  it('maps every legacy code, InUseAttributeError included, and nothing inherited', () => {
+    expect(new D('m', 'InUseAttributeError').code).toBe(10);
+    expect(new D('m', 'toString').code).toBe(0);
+  });
+
+  it('reads code from its slot, not from a shadowed name', () => {
+    const e = new D('message', 'InvalidCharacterError');
+    Object.defineProperty(e, 'name', { value: 'WrongDocumentError' });
+    expect(e.code).toBe(5);
+  });
+
+  it('formats through Error.prototype.toString and refuses a call without new', () => {
+    expect(new D('message', 'name').toString()).toBe('name: message');
+    expect(() => D()).toThrow(TypeError);
+  });
+});

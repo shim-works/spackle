@@ -44,13 +44,25 @@ const defaultCompare = (a: any, b: any): number => {
 // bottom-up merge sort: stable, one aux buffer, iterative so deep arrays
 // can't blow the stack. `<= 0` on the left keeps equal items in first-seen
 // order — the stability guarantee V8 didn't give until Chrome 70.
-const stableSort = (items: any[], compare: (a: any, b: any) => number): void => {
-  const length = items.length;
+// Comparator for the call in progress. Module-level instead of a per-call
+// closure; arraySort saves and restores it, so a comparator that sorts again
+// (re-entrancy) still sees its own.
+let activeCompareFn: any;
+const userCompare = (a: any, b: any): number => {
+  const numeric = +activeCompareFn(a, b); // +x, not Number(x)
+  return numeric === numeric ? numeric : 0;
+};
+
+/*
+ * Merge sort over null-prototype lists: they are spec-internal, so no index
+ * write on them may reach a setter on Array.prototype or Object.prototype.
+ */
+const stableSort = (items: any, length: number, compare: (a: any, b: any) => number): any => {
   if (length < 2) {
-    return;
+    return items;
   }
   let source = items;
-  let target = new Array(length);
+  let target: any = Object.create(null);
   for (let width = 1; width < length; width *= 2) {
     for (let start = 0; start < length; start += width * 2) {
       let left = start;
@@ -76,58 +88,57 @@ const stableSort = (items: any[], compare: (a: any, b: any) => number): void => 
     source = target;
     target = swap;
   }
-  // after an odd number of passes the result lives in the buffer — copy home
-  if (source !== items) {
-    for (let i = 0; i < length; i++) {
-      items[i] = source[i];
-    }
-  }
+  return source;
 };
 
-export const arraySort = function <T>(this: any, compareFn?: (a: T, b: T) => number): T[] {
+// Declared (comparefn) for the spec length of 1.
+export const arraySort = function sort(this: any, comparefn?: any): any {
+  if (comparefn !== undefined && typeof comparefn !== 'function') {
+    throw new TypeError('The comparison function must be either a function or undefined');
+  }
   if (this === null || this === undefined) {
     throw new TypeError('Array.prototype.sort called on null or undefined');
-  }
-  if (compareFn !== undefined && typeof compareFn !== 'function') {
-    throw new TypeError('The comparison function must be either a function or undefined');
   }
   const object = Object(this);
   // inlined: toLength(object.length)
   let length = +object.length;
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
-  // pull out the present values; per spec undefineds sort after everything
-  // and holes pack after the undefineds
-  const items: any[] = [];
+  // SortIndexedProperties: read each present element exactly once. undefineds
+  // sort after everything (the comparator never sees them), holes after those.
+  let items: any = Object.create(null);
+  let itemCount = 0;
   let undefinedCount = 0;
-  let holeCount = 0;
   for (let i = 0; i < length; i++) {
-    if (!(i in object)) {
-      holeCount++;
-    } else if (object[i] === undefined) {
-      undefinedCount++;
-    } else {
-      items.push(object[i]);
+    if (i in object) {
+      const value = object[i];
+      if (value === undefined) {
+        undefinedCount++;
+      } else {
+        items[itemCount++] = value;
+      }
     }
   }
-  // spec coerces the comparator result with ToNumber and treats NaN as 0
-  const compare = compareFn
-    ? function (a: any, b: any): number {
-      const numeric = +compareFn(a, b); // +x, not Number(x)
-      return numeric === numeric ? numeric : 0;
+  if (comparefn === undefined) {
+    items = stableSort(items, itemCount, defaultCompare);
+  } else {
+    const saved = activeCompareFn;
+    activeCompareFn = comparefn;
+    try {
+      items = stableSort(items, itemCount, userCompare);
+    } finally {
+      activeCompareFn = saved;
     }
-    : defaultCompare;
-  stableSort(items, compare);
-  // write back: sorted values, then undefineds, then delete the hole tail
+  }
+  // write back only after sorting: values, then undefineds, then delete the rest
   let index = 0;
-  for (let i = 0; i < items.length; i++) {
+  for (let i = 0; i < itemCount; i++) {
     object[index++] = items[i];
   }
   for (let u = 0; u < undefinedCount; u++) {
     object[index++] = undefined;
   }
-  for (let h = 0; h < holeCount; h++) {
-    delete object[index++];
+  for (; index < length; index++) {
+    delete object[index];
   }
   return object;
 };
-

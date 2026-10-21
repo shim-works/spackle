@@ -2,8 +2,8 @@ import {
   arrayConcat,
   isSupported as isArrayConcatSupported,
 } from '../src/modules/es.array.concat.js';
-import { arrayFilter } from '../src/modules/es.array.filter.js';
-import { arrayMap } from '../src/modules/es.array.map.js';
+import { arrayFilter, isSupported as isArrayFilterSupported } from '../src/modules/es.array.filter.js';
+import { arrayMap, isSupported as isArrayMapSupported } from '../src/modules/es.array.map.js';
 import { arraySlice } from '../src/modules/es.array.slice.js';
 import { arraySplice } from '../src/modules/es.array.splice.js';
 
@@ -245,5 +245,30 @@ describe('Array species-aware methods — test262 conformance', () => {
       } as any;
       expect(isArrayConcatSupported()).toBe(false);
     });
+  });
+});
+
+// core-js's arrayMethodHasSpeciesSupport, decided by the native Array[@@species]
+describe('map / filter gates', () => {
+  const gates = [isArrayMapSupported, isArrayFilterSupported];
+  const saved = Object.getOwnPropertyDescriptor(Array, Symbol.species)!;
+  afterEach(() => {
+    Object.defineProperty(Array, Symbol.species, saved);
+  });
+
+  it('keep a native that ships Array[@@species]', () => {
+    for (const gate of gates) expect(gate()).toBe(true);
+  });
+
+  it('replace the native when Array[@@species] is missing (Chrome < 51, Safari < 10)', () => {
+    delete (Array as any)[Symbol.species];
+    for (const gate of gates) expect(gate()).toBe(false);
+  });
+
+  it('do not count spackle\'s own @@species getter as native support', () => {
+    const get: any = function () { return this; };
+    Object.defineProperty(get, '__polyfilled', { value: true });
+    Object.defineProperty(Array, Symbol.species, { get, configurable: true });
+    for (const gate of gates) expect(gate()).toBe(false);
   });
 });

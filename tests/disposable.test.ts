@@ -239,9 +239,10 @@ describe('brand checks (from test262)', () => {
     expect(() => (DisposableStack as any).prototype.dispose.call(1)).toThrow(TypeError);
   });
 
-  it('rejects the OTHER stack class — _stack alone cannot tell them apart', () => {
+  it('rejects the OTHER stack class — _stack alone cannot tell them apart', async () => {
     expect(() => (DisposableStack as any).prototype.dispose.call(asyncStack)).toThrow(TypeError);
-    expect(() => (AsyncDisposableStack as any).prototype.disposeAsync.call(stack)).toThrow(TypeError);
+    // disposeAsync rejects rather than throws (test262 disposeAsync/this-does-not-have-internal-asyncdisposablestate-rejects.js)
+    await expect((AsyncDisposableStack as any).prototype.disposeAsync.call(stack)).rejects.toBeInstanceOf(TypeError);
   });
 
   // split from the name assertion below: the brand check is engine-independent

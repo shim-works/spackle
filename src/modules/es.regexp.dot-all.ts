@@ -24,23 +24,26 @@ export const isSupported = (): boolean => {
  *   is no way to change how the engine's own matcher treats `.` from ES5.
  */
 
+const objectToString = Object.prototype.toString;
+const RegExpProto = RegExp.prototype;
+
 /*
- * Own `flags` only. Reading `this.flags` reaches es.regexp.flags' getter, which
- * reads `dotAll`: infinite recursion where both are polyfilled (Chrome 41).
- * Without a native dotAll the flag can't have been set, so false is correct.
+ * Never reads `flags`: es.regexp.flags reads `dotAll`, so deriving one from
+ * the other recursed until the stack overflowed where both were polyfilled.
+ * Every engine that parses `s` ships a native dotAll, so this getter only ever
+ * runs where the flag cannot be set: a real RegExp's dotAll is always false.
  */
 export const regexpDotAllGetter = function (this: any): boolean | undefined {
-  if (this === null || typeof this !== 'object') {
+  if (this === null || (typeof this !== 'object' && typeof this !== 'function')) {
     throw new TypeError('RegExp.prototype.dotAll getter called on a non-object');
   }
-  if (!Object.prototype.hasOwnProperty.call(this, 'flags')) {
-    return false;
-  }
-  const flags = this.flags;
-  if (typeof flags !== 'string') {
+  if (this === RegExpProto) {
     return undefined;
   }
-  return flags.indexOf('s') !== -1;
+  if (objectToString.call(this) !== '[object RegExp]') {
+    throw new TypeError('RegExp.prototype.dotAll getter called on an object that is not a RegExp');
+  }
+  return false;
 };
 
 export const install = (): void => {

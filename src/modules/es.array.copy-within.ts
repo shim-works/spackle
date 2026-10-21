@@ -14,12 +14,9 @@ const min = Math.min;
 const ceil = Math.ceil;
 const floor = Math.floor;
 
-export const arrayCopyWithin = function <T>(
-  this: ArrayLike<T>,
-  target: number,
-  start: number,
-  end?: number,
-): any {
+// Declared (target, start) for the spec length of 2; end comes from arguments.
+export const arrayCopyWithin = function copyWithin(this: any, target: any, start: any): any {
+  const end = arguments.length > 2 ? arguments[2] : undefined;
   // inlined: toObject(this)
   if (this === null || this === undefined) {
     throw new TypeError('Array.prototype.copyWithin called on null or undefined');

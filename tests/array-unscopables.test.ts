@@ -44,6 +44,21 @@ describe('Array.prototype[@@unscopables] — test262 conformance', () => {
     expect(table().flatMap).toBe(true);
   });
 
+  it('adds every spec name a native table is missing (Chrome 41 has no at)', () => {
+    const t = table();
+    const saved = Object.getOwnPropertyDescriptor(t, 'at');
+    try {
+      delete t.at;
+      expect(flatSupported()).toBe(false);
+      installFlat();
+      expect(Object.getOwnPropertyDescriptor(t, 'at')).toEqual({ value: true, writable: true, enumerable: true, configurable: true });
+      expect(flatSupported()).toBe(true);
+      expect('with' in t).toBe(false);
+    } finally {
+      if (saved) Object.defineProperty(t, 'at', saved);
+    }
+  });
+
   it('is a null-prototype object', () => {
     installFlat();
     expect(Object.getPrototypeOf(table())).toBe(null);

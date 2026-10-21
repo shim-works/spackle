@@ -88,11 +88,15 @@ export const hideSymbolKeys = (): void => {
   // Each replacement carries the __polyfilled marker, so spackle-verify sees it as ours.
   const replace = (owner: any, key: string, value: any): void => {
     defineProperty(value, '__polyfilled', { value: true });
+    // the bundler may rename a function expression; the spec name is the key
+    try {
+      defineProperty(value, 'name', { value: key, configurable: true });
+    } catch (e) { /* Function#name non-configurable pre-ES6 */ }
     owner[key] = value;
   };
 
   const nativeKeys = Object.keys;
-  replace(Object, 'keys', function (target: any): string[] {
+  replace(Object, 'keys', function keys(target: any): string[] {
     const keys = nativeKeys(target);
     // inlined: withoutSymbolKeys(keys) -- keys are always strings here
     let firstHit = -1;
@@ -115,7 +119,7 @@ export const hideSymbolKeys = (): void => {
 
   const nativeNames = Object.getOwnPropertyNames;
   if (typeof nativeNames === 'function') {
-    replace(Object, 'getOwnPropertyNames', function (target: any): string[] {
+    replace(Object, 'getOwnPropertyNames', function getOwnPropertyNames(target: any): string[] {
       const keys = nativeNames(target);
       // inlined: withoutSymbolKeys(keys) -- keys are always strings here
       let firstHit = -1;
@@ -137,42 +141,45 @@ export const hideSymbolKeys = (): void => {
     });
   }
 
-  const nativeEntries = (Object as any).entries;
-  if (typeof nativeEntries === 'function') {
-    replace(Object, 'entries', function (target: any): any[] {
-      const pairs = nativeEntries(target);
-      // Look before copying, as above.
-      let hit = -1;
-      for (let i = 0; i < pairs.length; i++) {
-        const key = pairs[i][0]; // inlined: isPolyfilledSymbolKey(key)
-        if (key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) { hit = i; break; }
-      }
-      if (hit === -1) return pairs;
+  // entries/values: EnumerableOwnProperties over the native names, skipping the
+  // shim's '@@' keys. Each key is re-checked just before it is read.
+  const isEnumerable = Object.prototype.propertyIsEnumerable;
+  const toObject = Object;
+  const listDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+  if (typeof (Object as any).entries === 'function') {
+    replace(Object, 'entries', function entries(target: any): any[] {
+      if (target === null || target === undefined) throw new TypeError('Cannot convert undefined or null to object');
+      const object = toObject(target);
+      const names = nativeNames(object);
       const out: any[] = [];
-      for (let before = 0; before < hit; before++) out[out.length] = pairs[before];
-      for (let after = hit + 1; after < pairs.length; after++) {
-        const key = pairs[after][0]; // inlined: isPolyfilledSymbolKey(key)
-        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64)) out[out.length] = pairs[after];
+      let count = 0;
+      for (let i = 0; i < names.length; i++) {
+        const key = names[i]; // inlined: isPolyfilledSymbolKey(key)
+        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) && isEnumerable.call(object, key)) {
+          listDesc.value = [key, object[key]];
+          defineProperty(out, count++, listDesc);
+        }
       }
+      listDesc.value = undefined;
       return out;
     });
   }
 
-  const nativeValues = (Object as any).values;
-  if (typeof nativeValues === 'function') {
-    replace(Object, 'values', function (target: any): any[] {
-      const keys = nativeKeys(target);
-      let hasSymbolKey = false;
-      for (let scan = 0; scan < keys.length; scan++) {
-        const key = keys[scan]; // inlined: isPolyfilledSymbolKey(key)
-        if (key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) { hasSymbolKey = true; break; }
-      }
-      if (!hasSymbolKey) return nativeValues(target);
+  if (typeof (Object as any).values === 'function') {
+    replace(Object, 'values', function values(target: any): any[] {
+      if (target === null || target === undefined) throw new TypeError('Cannot convert undefined or null to object');
+      const object = toObject(target);
+      const names = nativeNames(object);
       const out: any[] = [];
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i]; // inlined: isPolyfilledSymbolKey(key)
-        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64)) out[out.length] = target[key];
+      let count = 0;
+      for (let i = 0; i < names.length; i++) {
+        const key = names[i]; // inlined: isPolyfilledSymbolKey(key)
+        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) && isEnumerable.call(object, key)) {
+          listDesc.value = object[key];
+          defineProperty(out, count++, listDesc);
+        }
       }
+      listDesc.value = undefined;
       return out;
     });
   }
@@ -184,19 +191,30 @@ export const hideSymbolKeys = (): void => {
      * The one API here that must NOT filter: Object.assign copies symbol keys too,
      * so '@@' keys are copied across.
      */
-    const copyingAssign = function (target: any): any {
+    // Declared (target, _source) for the spec length of 2.
+    const copyingAssign = function assign(target: any, _source?: any): any {
       if (target === null || target === undefined) {
         throw new TypeError('Cannot convert undefined or null to object');
       }
       const to = Object(target);
+      // A String target's indices are read-only; old engines ignore the write
+      const stringLength = typeof target === 'string' ? target.length : -1;
       for (let i = 1; i < arguments.length; i++) {
         const source = arguments[i];
         // A primitive source contributes its boxed own keys and must never
         // abort the sources that follow it.
         if (source === null || source === undefined) continue;
-        const keys = nativeKeys(Object(source));
+        const from = Object(source);
+        // every own key, '@@' symbol keys included, each checked for
+        // enumerability just before it is copied
+        const keys = nativeNames(from);
         for (let k = 0; k < keys.length; k++) {
-          to[keys[k]] = source[keys[k]];
+          const key = keys[k];
+          if (!isEnumerable.call(from, key)) continue;
+          if (stringLength > 0 && String(+key >>> 0) === key && +key < stringLength) {
+            throw new TypeError("Cannot assign to read only property '" + key + "' of string");
+          }
+          to[key] = from[key];
         }
       }
       return to;
@@ -208,7 +226,7 @@ export const hideSymbolKeys = (): void => {
   // cheapest way in: returning undefined omits the property.
   if (typeof JSON !== 'undefined' && typeof JSON.stringify === 'function') {
     const nativeStringify = JSON.stringify;
-    replace(JSON, 'stringify', function (value: any, replacer?: any, space?: any): any {
+    replace(JSON, 'stringify', function stringify(value: any, replacer?: any, space?: any): any {
       // the array form is already a whitelist, so '@@' keys can't sneak in
       if (Object.prototype.toString.call(replacer) === '[object Array]') {
         return nativeStringify(value, replacer, space);
@@ -228,45 +246,76 @@ export const hideSymbolKeys = (): void => {
 
 // Instance prototype, kept separate from `SymbolPolyfill.prototype` so that
 // `sym instanceof SymbolPolyfill` is false (matches native: symbols aren't
-// instances of the Symbol wrapper). `toString` returns the private `@@name` so
-// that property-key coercion resolves to the hidden key.
+// instances of the Symbol wrapper). Its `toString` returns the private `@@name`
+// so that property-key coercion resolves to the hidden key -- the one place the
+// shim cannot follow the spec, since an ES5 engine converts keys with toString.
 const symbolProto: any = {};
-defineProperty(symbolProto, 'toString', {
-  value: function (this: any) {
-    return this.__name__;
-  },
-});
-defineProperty(symbolProto, 'valueOf', {
-  value: function (this: any) {
-    return this;
-  },
-});
-defineProperty(symbolProto, 'description', {
-  configurable: true,
-  get: function (this: any) {
-    return this.__description__;
-  },
-});
+const hasOwnProp = Object.prototype.hasOwnProperty;
+const isShimSymbol = (value: any): boolean =>
+  value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === symbolProto && hasOwnProp.call(value, '__name__');
+const thisSymbolValue = (value: any, method: string): any => {
+  if (!isShimSymbol(value)) throw new TypeError(method + ' requires that \'this\' be a Symbol');
+  return value;
+};
+const descriptionGetter = function (this: any): string | undefined {
+  return thisSymbolValue(this, 'Symbol.prototype.description').__description__;
+};
+const METHOD: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
+METHOD.value = function toString(this: any) {
+  return thisSymbolValue(this, 'Symbol.prototype.toString').__name__;
+};
+defineProperty(symbolProto, 'toString', METHOD);
+METHOD.value = function valueOf(this: any) {
+  return thisSymbolValue(this, 'Symbol.prototype.valueOf');
+};
+defineProperty(symbolProto, 'valueOf', METHOD);
+METHOD.value = undefined;
+defineProperty(symbolProto, 'description', { configurable: true, enumerable: false, get: descriptionGetter });
 
 // Declared above SymbolPolyfill: the well-knowns below call it at module scope.
 const SLOT: PropertyDescriptor = { value: undefined };
 
-export const SymbolPolyfill: any = function Symbol(this: any, description?: any): any {
+// Declared with no parameters for the spec length of 0; description from arguments.
+export const SymbolPolyfill: any = function Symbol(this: any): any {
   if (this instanceof (SymbolPolyfill as any)) {
     throw new TypeError('Symbol is not a constructor');
   }
+  const description = arguments.length > 0 ? arguments[0] : undefined;
+  if (isShimSymbol(description)) {
+    throw new TypeError('Cannot convert a Symbol value to a string');
+  }
   const symbol = Object.create(symbolProto);
-  const desc = description === undefined ? '' : String(description);
+  // undefined stays undefined: Symbol().description is undefined, Symbol('') is ''
+  const desc = description === undefined ? undefined : String(description);
   // One reused descriptor (non-writable, non-enumerable, non-configurable by
   // omission): two literals here were two extra objects per Symbol() call.
   SLOT.value = desc;
   defineProperty(symbol, '__description__', SLOT);
   // inlined: generateName(desc)
-  SLOT.value = '@@' + desc + '_' + ++symbolCounter;
+  SLOT.value = '@@' + (desc === undefined ? '' : desc) + '_' + ++symbolCounter;
   defineProperty(symbol, '__name__', SLOT);
   SLOT.value = undefined; // never pin the last description
   return symbol;
 };
+
+// Symbol.prototype: the spec members, brand-checked against shim symbols.
+// toString here is the spec's "Symbol(desc)"; only the instance toString above
+// returns the property key.
+const SP: any = SymbolPolyfill.prototype;
+METHOD.value = function toString(this: any) {
+  const desc = thisSymbolValue(this, 'Symbol.prototype.toString').__description__;
+  return 'Symbol(' + (desc === undefined ? '' : desc) + ')';
+};
+defineProperty(SP, 'toString', METHOD);
+METHOD.value = function valueOf(this: any) {
+  return thisSymbolValue(this, 'Symbol.prototype.valueOf');
+};
+defineProperty(SP, 'valueOf', METHOD);
+METHOD.value = undefined;
+try {
+  defineProperty(descriptionGetter, 'name', { value: 'get description', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+defineProperty(SP, 'description', { configurable: true, enumerable: false, get: descriptionGetter });
 
 // Well-known symbols. Installed before any other island evaluates, because
 // islands read these as property keys at evaluation time: keep new well-knowns
@@ -294,28 +343,41 @@ for (let i = 0; i < wellKnown.length; i++) {
   });
 }
 
+// Symbol.prototype[@@toPrimitive] and [@@toStringTag], now that the well-knowns exist.
+const symbolToPrimitive = function (this: any, _hint: any) {
+  return thisSymbolValue(this, 'Symbol.prototype[Symbol.toPrimitive]');
+};
+try {
+  defineProperty(symbolToPrimitive, 'name', { value: '[Symbol.toPrimitive]', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+defineProperty(SP, (SymbolPolyfill as any).toPrimitive, { value: symbolToPrimitive, writable: false, enumerable: false, configurable: true });
+defineProperty(SP, (SymbolPolyfill as any).toStringTag, { value: 'Symbol', writable: false, enumerable: false, configurable: true });
+
 // Global registry: Symbol.for interns by key; Symbol.keyFor reverses it.
 const registry: any = Object.create(null);
-defineProperty(SymbolPolyfill, 'for', {
-  value: function (key: any) {
-    const k = String(key);
-    if (registry[k]) {
-      return registry[k];
-    }
-    registry[k] = (SymbolPolyfill as any)(k);
-    return registry[k];
-  },
-});
-defineProperty(SymbolPolyfill, 'keyFor', {
-  value: function (symbol: any) {
-    for (const key in registry) {
-      if (registry[key] === symbol) {
-        return key;
-      }
-    }
-    return undefined;
-  },
-});
+METHOD.value = function (key: any) {
+  if (isShimSymbol(key)) throw new TypeError('Cannot convert a Symbol value to a string');
+  const k = String(key);
+  const existing = registry[k];
+  if (existing) {
+    return existing;
+  }
+  const symbol = (SymbolPolyfill as any)(k);
+  // the registry key lives on the symbol, so keyFor needs no search
+  SLOT.value = k;
+  defineProperty(symbol, '__registryKey__', SLOT);
+  SLOT.value = undefined;
+  registry[k] = symbol;
+  return symbol;
+};
+try { defineProperty(METHOD.value, 'name', { value: 'for', configurable: true }); } catch (e) { /* pre-ES6 */ }
+defineProperty(SymbolPolyfill, 'for', METHOD);
+METHOD.value = function keyFor(symbol: any) {
+  if (!isShimSymbol(symbol)) throw new TypeError(String(symbol) + ' is not a symbol');
+  return hasOwnProp.call(symbol, '__registryKey__') ? symbol.__registryKey__ : undefined;
+};
+defineProperty(SymbolPolyfill, 'keyFor', METHOD);
+METHOD.value = undefined;
 
 /**
  * Everything Symbol, in one call, run first (see src/index.ts): other islands

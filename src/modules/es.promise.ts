@@ -199,7 +199,20 @@ export const install = (): void => {
   // Before the constructor goes on the window: promise-polyfill reads
   // _immediateFn per callback, so replacing it here covers every promise this
   // page will ever create.
-  (PromisePolyfillImpl as any)._immediateFn = scheduleDrain();
+  // Promise jobs and queueMicrotask callbacks share one FIFO queue (HTML; core-js
+  // shares its internal microtask). So when a queueMicrotask exists -- spackle's,
+  // installed first, on every engine that gets this Promise -- the jobs go through
+  // it, looked up on window rather than imported. Only without one does this
+  // island run its own queue.
+  const w: any = window;
+  const queueMicrotaskFn = w.queueMicrotask;
+  (PromisePolyfillImpl as any)._immediateFn =
+    typeof queueMicrotaskFn === 'function'
+      ? function (job: () => void): void {
+          // called with window as this: a native queueMicrotask needs it
+          queueMicrotaskFn.call(w, job);
+        }
+      : scheduleDrain();
   handlerAttributeIsWired = 'onunhandledrejection' in (window as any);
   (PromisePolyfillImpl as any)._unhandledRejectionFn = reportUnhandledRejection;
 
@@ -209,6 +222,28 @@ export const install = (): void => {
   // the gates in install-polyfills.ts install spackle's islands instead.
   delete (PromisePolyfillImpl as any).any;
   delete (PromisePolyfillImpl as any).allSettled;
+
+  // promise-polyfill attaches everything by plain assignment, so its statics and
+  // methods enumerate; built-ins don't (core-js installs every one hidden). Same
+  // functions, enumerable switched off. Install time only.
+  const hide = function (owner: any, names: string[]): void {
+    for (let i = 0; i < names.length; i++) {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, names[i]);
+      if (descriptor && descriptor.enumerable) {
+        descriptor.enumerable = false;
+        Object.defineProperty(owner, names[i], descriptor);
+      }
+    }
+  };
+  hide(PromisePolyfillImpl, ['all', 'race', 'resolve', 'reject', '_immediateFn', '_unhandledRejectionFn']);
+  hide((PromisePolyfillImpl as any).prototype, ['then', 'finally']);
+  // Spec (and core-js's es.promise.catch): catch(f) is this.then(undefined, f).
+  // promise-polyfill passes null, which a replaced `then` can tell apart.
+  const promiseCatch = function (this: any, onRejected: any): any {
+    return this.then(undefined, onRejected);
+  };
+  try { Object.defineProperty(promiseCatch, 'name', { value: 'catch', configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty((PromisePolyfillImpl as any).prototype, 'catch', { value: promiseCatch, writable: true, enumerable: false, configurable: true });
 
   define((window as any), 'Promise', PromisePolyfillImpl);
 };

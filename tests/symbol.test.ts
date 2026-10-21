@@ -66,7 +66,9 @@ describe('Symbol polyfill (es6-symbol replacement)', () => {
 
     it('exposes description', () => {
       expect((SymbolPolyfill('hi') as any).description).toBe('hi');
-      expect((SymbolPolyfill() as any).description).toBe('');
+      // test262 Symbol/prototype/description: undefined when none was given, '' for ''
+      expect((SymbolPolyfill() as any).description).toBeUndefined();
+      expect((SymbolPolyfill('') as any).description).toBe('');
     });
   });
 

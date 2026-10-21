@@ -7,8 +7,17 @@ export const isSupported = (): boolean => {
 };
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.iswellformed */
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
 export const stringIsWellFormed = function (this: any): boolean {
-  const str = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
+  if (this === null || this === undefined) {
+    throw new TypeError('String.prototype.isWellFormed called on null or undefined');
+  }
+  const str = toStr(this);
   for (let i = 0; i < str.length; i++) {
     const code = str.charCodeAt(i);
     // lone low surrogate — a paired one would've been consumed below

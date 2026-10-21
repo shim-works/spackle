@@ -1,7 +1,22 @@
 // String.prototype.includes: existence-only (no half-broken native in range).
+// core-js's correctIsRegExpLogic: the native must reject a RegExp, yet accept
+// one whose @@match is false, because IsRegExp reads @@match. Chrome 41 and
+// Safari 9 have no Symbol.match of their own, so they reject both and are
+// replaced.
 export const isSupported = (): boolean => {
   try {
-    return typeof String.prototype.includes === 'function';
+    if (typeof String.prototype.includes !== 'function') return false;
+    const matchKey = typeof Symbol !== 'undefined' ? (Symbol as any).match : undefined;
+    if (!matchKey) return true; // nothing for IsRegExp to read
+    const regexp: any = /./;
+    try {
+      ('/./' as any).includes(regexp);
+      return false;
+    } catch (e) {
+      /* a RegExp is refused, as it should be */
+    }
+    regexp[matchKey] = false;
+    return ('/./' as any).includes(regexp) === true;
   } catch {
     return false;
   }
@@ -9,18 +24,22 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.includes */
 // IsRegExp: @@match decides when present, else the RegExp brand (not instanceof).
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
 const objectToString = Object.prototype.toString;
 
-export const stringIncludes = function (
-  this: string,
-  search: any,
-  start?: number,
-): boolean {
+// Declared (searchString) for the spec length of 1; the position comes from arguments.
+export const stringIncludes = function includes(this: any, search: any): boolean {
+  const start = arguments.length > 1 ? arguments[1] : undefined;
   // RequireObjectCoercible + ToString(this) first: `this` can be any value.
   if (this === null || this === undefined) {
     throw new TypeError('String.prototype.includes called on null or undefined');
   }
-  const s = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
+  const s = toStr(this);
   // the spec explicitly rejects a regex here — includes is for plain strings
   // inlined: isRegExp(search) -- primitives skip straight past
   let isRegExpValue = false;
@@ -34,6 +53,6 @@ export const stringIncludes = function (
       'First argument to String.prototype.includes must not be a regular expression',
     );
   }
-  return s.indexOf(String(search), start) !== -1;
+  return s.indexOf(toStr(search), start) !== -1;
 };
 

@@ -1,6 +1,11 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Array.prototype.indexOf === 'function';
+    if (typeof Array.prototype.indexOf !== 'function') return false;
+    // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length
+    // as 1 and answers at once, where on a huge real length it would walk ~2^32
+    // indices (the Chrome 38 hang / OOM)
+    const o: any = { length: 4294967297, 4294967296: 'x' };
+    return (Array.prototype.indexOf as any).call(o, 'x', 4294967296) === 4294967296;
   } catch {
     return false;
   }
@@ -8,7 +13,8 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.indexof */
 
-export const arrayIndexOf = function (this: any, searchElement: any, fromIndex?: any): number {
+// Declared (searchElement) only, for the spec length of 1; fromIndex comes from arguments.
+export const arrayIndexOf = function indexOf(this: any, searchElement: any): number {
   if (this === null || this === undefined) {
     throw new TypeError('Array.prototype.indexOf called on null or undefined');
   }
@@ -20,8 +26,9 @@ export const arrayIndexOf = function (this: any, searchElement: any, fromIndex?:
     return -1;
   }
   // inlined: toInteger(fromIndex)
-  let start = +fromIndex;
-  start = start !== start ? 0 : start < 0 ? Math.ceil(start) : Math.floor(start);
+  // + 0 turns -0 into +0, so a match at index 0 reports +0 as the spec's ToIntegerOrInfinity does.
+  let start = arguments.length > 1 ? +arguments[1] : 0;
+  start = (start !== start ? 0 : start < 0 ? Math.ceil(start) : Math.floor(start)) + 0;
   if (start >= length) {
     return -1;
   }

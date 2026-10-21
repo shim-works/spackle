@@ -110,3 +110,34 @@ describe('URLSearchParams — decoding, matches native', () => {
     same('pct=%&pct2=%zz');
   });
 });
+
+describe('URLSearchParams polyfill — iteration', () => {
+  const P: any = USPPolyfill;
+
+  it('spreads the params and every iterator kind', () => {
+    expect([...new P('a=1&b=2')]).toEqual([['a', '1'], ['b', '2']]);
+    expect([...new P('a=1&b=2').entries()]).toEqual([['a', '1'], ['b', '2']]);
+    expect(Array.from(new P('a=1&b=2').keys())).toEqual(['a', 'b']);
+    expect(Array.from(new P('a=1&b=2').values())).toEqual(['1', '2']);
+  });
+
+  it('makes @@iterator the entries function, and tags its iterators', () => {
+    expect(P.prototype[Symbol.iterator]).toBe(P.prototype.entries);
+    expect(Object.prototype.toString.call(new P('').entries())).toBe('[object URLSearchParams Iterator]');
+  });
+
+  it('walks the live list: a delete during the loop shifts the index, as native does', () => {
+    const p = new P('param0=0&param1=1&param2=2');
+    const seen: string[] = [];
+    for (const [key] of p) {
+      seen.push(key);
+      p.delete(key);
+    }
+    expect([seen, p.toString()]).toEqual([['param0', 'param2'], 'param1=1']);
+  });
+
+  it('refuses next on a foreign receiver', () => {
+    const next = Object.getPrototypeOf(new P('').entries()).next;
+    expect(() => next.call({})).toThrow(TypeError);
+  });
+});

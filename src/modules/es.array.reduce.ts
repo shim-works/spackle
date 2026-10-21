@@ -1,6 +1,20 @@
+const STOP = {};
+
 export const isSupported = (): boolean => {
   try {
-    return typeof Array.prototype.reduce === 'function';
+    const method = Array.prototype.reduce;
+    if (typeof method !== 'function') return false;
+    // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length as 1
+    // and visits only index 0, where on a huge real length it would walk ~2^32
+    // indices (the Chrome 38 hang). A ToLength native goes on to index 1, where the
+    // callback throws, so the probe ends at once on both.
+    const o: any = { length: 4294967297, 0: 0, 1: 1 };
+    try {
+      (method as any).call(o, function (_a: any, _v: any, k: number) { if (k === 1) throw STOP; }, 0);
+      return false;
+    } catch (e) {
+      return e === STOP;
+    }
   } catch {
     return false;
   }
@@ -8,41 +22,29 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.reduce */
 
-export const arrayReduce = function (this: any, callback: any, initialValue?: any): any {
-  if (this === null || this === undefined) {
-    throw new TypeError('Array.prototype.reduce called on null or undefined');
-  }
-  if (typeof callback !== 'function') {
-    throw new TypeError('callback is not a function');
-  }
-  const object = Object(this);
-  // inlined: toLength(object.length)
-  let length = +object.length;
+// Declared (callbackfn) only, for the spec length of 1; initialValue comes from arguments.
+export const arrayReduce = function reduce(this: any, callbackfn: any): any {
+  // inlined: ToObject(this)
+  if (this === null || this === undefined) throw new TypeError('Array.prototype.reduce called on null or undefined');
+  const O = Object(this);
+  // inlined: ToLength(Get(O, "length")) -- before the callback check, as the spec orders it
+  let length = +O.length;
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
+  if (typeof callbackfn !== 'function') throw new TypeError('Array.prototype.reduce: callback is not a function');
+  let k = 0;
   let accumulator: any;
-  let index = 0;
   if (arguments.length > 1) {
-    accumulator = initialValue;
+    accumulator = arguments[1];
   } else {
-    // no seed — the first present element becomes the accumulator
-    let found = false;
-    while (index < length) {
-      if (index in object) {
-        accumulator = object[index++];
-        found = true;
-        break;
-      }
-      index++;
+    // no seed -- the first present element becomes the accumulator
+    let present = false;
+    for (; !present && k < length; k++) {
+      if (k in O) { present = true; accumulator = O[k]; }
     }
-    if (!found) {
-      throw new TypeError('Reduce of empty array with no initial value');
-    }
+    if (!present) throw new TypeError('Reduce of empty array with no initial value');
   }
-  for (; index < length; index++) {
-    if (index in object) {
-      accumulator = callback(accumulator, object[index], index, object);
-    }
+  for (; k < length; k++) {
+    if (k in O) accumulator = callbackfn(accumulator, O[k], k, O);
   }
   return accumulator;
 };
-

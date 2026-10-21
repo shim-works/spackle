@@ -22,8 +22,8 @@ describe('RegExp.escape (ES2025) — test262 conformance', () => {
   it('escapes punctuators and whitespace that could splice into patterns', () => {
     expect(regExpEscape('-')).toBe('\\x2d');
     expect(regExpEscape(' ')).toBe('\\x20');
-    expect(regExpEscape('\t')).toBe('\\x09');
-    expect(regExpEscape('\n')).toBe('\\x0a');
+    // ControlEscape, per test262 escaped-control-characters.js
+    expect(regExpEscape('\t\n\v\f\r')).toBe('\\t\\n\\v\\f\\r');
     expect(regExpEscape('!')).toBe('\\x21');
     expect(regExpEscape(',')).toBe('\\x2c');
   });

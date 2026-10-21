@@ -82,3 +82,39 @@ describe('RegExp.prototype.toString island', () => {
     expect(regExpToString.call(/a|b/m)).toBe(/a|b/m.toString());
   });
 });
+
+// From spackle-verify's RegExp constructor checks (test262 call_with_*.js,
+// from-regexp-like*.js, source escaping): the wrapper Chrome < 49 gets.
+describe('RegExp wrapper follows the constructor steps', () => {
+  const R: any = RegExpPolyfill;
+  const M: any = (Symbol as any).match;
+
+  it('RegExp(re) returns re when its constructor is RegExp, new never does', () => {
+    const r = /a/;
+    expect(R(r)).toBe(r);
+    expect(new R(r)).not.toBe(r);
+    const other: any = /(?:)/;
+    other.constructor = null;
+    expect(R(other)).not.toBe(other);
+  });
+
+  it('reads source, then flags, from a regexp-like object', () => {
+    const like: any = { source: 'source text', flags: 'i' };
+    like[M] = true;
+    const r = new R(like);
+    expect([r.source, r.flags]).toEqual(['source text', 'i']);
+    const order: string[] = [];
+    const watched: any = {};
+    watched[M] = true;
+    Object.defineProperty(watched, 'source', { get: () => { order.push('source'); return 'x'; } });
+    Object.defineProperty(watched, 'flags', { get: () => { order.push('flags'); return 'g'; } });
+    new R(watched);
+    expect(order).toEqual(['source', 'flags']);
+  });
+
+  it('escapes / and line terminators in source', () => {
+    expect(new R('/').source).toBe('\\/');
+    expect(new R('[/]').source).toBe('[/]');
+    expect(new R('a\nb').test('a\nb')).toBe(true);
+  });
+});

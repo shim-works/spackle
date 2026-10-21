@@ -14,6 +14,12 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype-@@iterator */
 
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
 const returnSelf = function (this: any) {
   return this;
 };
@@ -21,7 +27,14 @@ const returnSelf = function (this: any) {
 // One shared prototype (see es.array.iterator).
 const StringIteratorPrototype: any = {};
 
-StringIteratorPrototype.next = function (this: any): any {
+const hasOwn = Object.prototype.hasOwnProperty;
+
+// %StringIteratorPrototype%.next. Brand check: an own _index slot (an object that
+// merely inherits from a string iterator is not one).
+const stringIteratorNext = function next(this: any): any {
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_index')) {
+    throw new TypeError('next method called on an object that is not a String Iterator');
+  }
   const string = this._string;
   if (string === null || this._index >= string.length) {
     // Release at exhaustion so a spent iterator does not pin the string.
@@ -44,6 +57,24 @@ StringIteratorPrototype.next = function (this: any): any {
   return { value: string.substring(index, index + size), done: false };
 };
 
+try {
+  Object.defineProperty(stringIteratorNext, 'name', { value: 'next', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+Object.defineProperty(StringIteratorPrototype, 'next', {
+  value: stringIteratorNext,
+  writable: true,
+  enumerable: false,
+  configurable: true,
+});
+if (typeof Symbol !== "undefined" && (Symbol as any).toStringTag) {
+  Object.defineProperty(StringIteratorPrototype, (Symbol as any).toStringTag, {
+    value: "String Iterator",
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
+}
+
 // self-iterable so for..of / spread accept the iterator itself
 if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
   Object.defineProperty(StringIteratorPrototype, (Symbol as any).iterator, {
@@ -54,6 +85,9 @@ if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
   });
 }
 
+// One reused descriptor for the slots; its value is cleared after each use.
+const slotDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: false };
+
 export const stringIterator = function (this: any): any {
   if (this === null || this === undefined) {
     throw new TypeError(
@@ -61,8 +95,12 @@ export const stringIterator = function (this: any): any {
     );
   }
   const iterator: any = Object.create(StringIteratorPrototype);
-  iterator._string = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
-  iterator._index = 0;
+  // internal slots stay non-enumerable, like the spec's: Object.keys(iterator) is []
+  slotDesc.value = toStr(this);
+  Object.defineProperty(iterator, '_string', slotDesc);
+  slotDesc.value = 0;
+  Object.defineProperty(iterator, '_index', slotDesc);
+  slotDesc.value = undefined;
   return iterator;
 };
 

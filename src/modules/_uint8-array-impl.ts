@@ -224,7 +224,9 @@ const decodeHex = (
   return { read: read, written: written };
 };
 
-export const uint8ArrayToBase64 = function (this: any, options?: any): string {
+// Declared with the spec length (0): pre-ES6 Function#length can't be redefined.
+export const uint8ArrayToBase64 = function (this: any): string {
+  const options = arguments.length > 0 ? arguments[0] : undefined;
   // inlined: assertUint8Array(this, 'toBase64', false) with isUint8Array
   if (
     typeof Uint8Array === 'undefined' ||
@@ -301,7 +303,9 @@ export const uint8ArrayToHex = function (this: any): string {
   return out;
 };
 
-export const uint8ArrayFromBase64 = function (input: any, options?: any): any {
+// Declared with the spec length (1): pre-ES6 Function#length can't be redefined.
+export const uint8ArrayFromBase64 = function (input: any): any {
+  const options = arguments.length > 1 ? arguments[1] : undefined;
   if (typeof input !== 'string') {
     throw new TypeError('argument must be a string');
   }
@@ -342,11 +346,12 @@ export const uint8ArrayFromHex = function (input: any): any {
   return out;
 };
 
+// Declared with the spec length (1): pre-ES6 Function#length can't be redefined.
 export const uint8ArraySetFromBase64 = function (
   this: any,
-  input: any,
-  options?: any
+  input: any
 ): { read: number; written: number } {
+  const options = arguments.length > 1 ? arguments[1] : undefined;
   // inlined: assertUint8Array(this, 'setFromBase64', false) with isUint8Array
   if (
     typeof Uint8Array === 'undefined' ||

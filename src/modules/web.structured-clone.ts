@@ -136,6 +136,19 @@ const cloneValue = (value: any, seen: any): any => {
     return copy;
   }
 
+  // One type lookup instead of a dozen instanceof checks (core-js dispatches on
+  // its classof the same way). Plain objects, most of what gets cloned, go
+  // straight to the copy: on Chrome 41, walking the whole chain below for an
+  // object nested in another made each clone ~500x slower than core-js.
+  // promise-polyfill's instances also report [object Object], so they go on to
+  // the chain, which refuses them.
+  if (objectToString.call(value) === '[object Object]' && !(typeof Promise === 'function' && value instanceof Promise)) {
+    const copy: any = {};
+    seen.set(value, copy);
+    copyProperties(value, copy, seen);
+    return copy;
+  }
+
   if (typeof Map === 'function' && value instanceof Map) {
     const copy = new Map();
     seen.set(value, copy);

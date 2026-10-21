@@ -7,11 +7,17 @@ export const isSupported = (): boolean => {
 };
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.at */
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
 export const stringAt = function (this: any, index: number): string | undefined {
   if (this === null || this === undefined) {
     throw new TypeError('String.prototype.at called on null or undefined');
   }
-  const source = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
+  const source = toStr(this);
   const length = source.length;
   let relativeIndex = +index; // +x, not Number(x): same coercion, no call
   if (relativeIndex !== relativeIndex) {

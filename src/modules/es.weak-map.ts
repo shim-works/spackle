@@ -48,63 +48,136 @@ export const isSupported = (): boolean => {
 
 const hasSymbol =
   typeof Symbol !== 'undefined' && (Symbol as any).toStringTag != null;
+const iteratorKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+const hasOwn = Object.prototype.hasOwnProperty;
 
 let counter = 0;
 
 // One reused descriptor per island: no allocation per construction.
 const SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 
-export const WeakMap = function (this: any, iterable?: any) {
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+// CanBeHeldWeakly: an object, or a symbol that is not in the global registry.
+const isRegisteredSymbol = (value: any): boolean => {
+  try {
+    return (Symbol as any).keyFor(value) !== undefined;
+  } catch (e) {
+    return false;
+  }
+};
+const canBeHeldWeakly = (value: any): boolean =>
+  isObject(value) || (typeof value === 'symbol' && !isRegisteredSymbol(value));
+
+const requireWeakMap = (self: any, method: string): void => {
+  if (self === null || typeof self !== 'object' || self._id === undefined) {
+    throw new TypeError('Method WeakMap.prototype.' + method + ' called on incompatible receiver');
+  }
+};
+
+/*
+ * Symbol keys can't carry the hidden property, so they go in a per-map side
+ * list (_skeys/_svals, created on first use). [incomplete] Those entries are
+ * held strongly: ES5 can't make them weak.
+ */
+const symbolIndex = (self: any, key: any): number => {
+  const keys = self._skeys;
+  if (keys === undefined) return -1;
+  for (let i = 0; i < keys.length; i++) if (keys[i] === key) return i;
+  return -1;
+};
+
+// IteratorClose after a per-item failure; a throwing return() must not mask the original.
+const closeIterator = (iterator: any): void => {
+  try {
+    const ret = iterator['return'];
+    if (ret !== undefined && ret !== null) ret.call(iterator);
+  } catch (e) {
+    /* the original error wins */
+  }
+};
+
+const arrayIterAtLoad: any = iteratorKey ? (Array.prototype as any)[iteratorKey] : undefined;
+
+export const WeakMap = function (this: any) {
   if (!(this instanceof WeakMap)) {
     throw new TypeError("Constructor WeakMap requires 'new'");
   }
   counter++;
   // Non-enumerable, like a native slot.
-  // inlined: slot(this, '_id', ...)
   SLOT.value = `__wm$${counter}$${Math.random().toString(36).substring(2)}`;
   Object.defineProperty(this, '_id', SLOT);
   SLOT.value = undefined; // never pin the last value
 
+  const iterable = arguments.length > 0 ? arguments[0] : undefined;
   if (iterable === null || iterable === undefined) {
     return;
   }
-
-  if (Array.isArray(iterable)) {
+  // Get(map, "set") for every iterable, even an empty one
+  const adder = this.set;
+  if (typeof adder !== 'function') {
+    throw new TypeError('WeakMap constructor: this.set is not a function');
+  }
+  if (Array.isArray(iterable) && (!iteratorKey || (iterable[iteratorKey] === arrayIterAtLoad && (Array.prototype as any)[iteratorKey] === arrayIterAtLoad))) {
     for (let i = 0; i < iterable.length; i++) {
-      this.set(iterable[i][0], iterable[i][1]);
+      const item = iterable[i];
+      if (!isObject(item)) throw new TypeError('Iterator value is not an entry object');
+      adder.call(this, item[0], item[1]);
     }
     return;
   }
-
-  if (
-    typeof Symbol !== 'undefined' &&
-    (Symbol as any).iterator != null &&
-    typeof iterable[(Symbol as any).iterator] === 'function'
-  ) {
-    const iterator = iterable[(Symbol as any).iterator]();
-    let step = iterator.next();
-    while (!step.done) {
-      this.set(step.value[0], step.value[1]);
-      step = iterator.next();
-    }
-    return;
+  const method = iteratorKey ? iterable[iteratorKey] : undefined;
+  if (typeof method !== 'function') {
+    throw new TypeError('WeakMap constructor argument is not iterable');
   }
-
-  throw new TypeError('WeakMap constructor argument is not iterable');
+  const iterator = method.call(iterable);
+  if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+  const next = iterator.next;
+  for (;;) {
+    const step = next.call(iterator);
+    if (!isObject(step)) throw new TypeError('Iterator result is not an object');
+    if (step.done) return;
+    const item = step.value;
+    try {
+      if (!isObject(item)) throw new TypeError('Iterator value is not an entry object');
+      adder.call(this, item[0], item[1]);
+    } catch (error) {
+      closeIterator(iterator);
+      throw error;
+    }
+  }
 } as any;
 
 // Reused descriptor: no allocation per call.
 const SET_SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 
 WeakMap.prototype.set = function (this: any, key: any, value: any): any {
-  // inlined: isObjectLike(key)
-  if ((key === null || (typeof key !== 'object' && typeof key !== 'function'))) {
+  requireWeakMap(this, 'set');
+  if (!canBeHeldWeakly(key)) {
     throw new TypeError('Invalid value used as weak map key');
+  }
+  if (typeof key === 'symbol') {
+    const at = symbolIndex(this, key);
+    if (at !== -1) {
+      this._svals[at] = value;
+    } else {
+      if (this._skeys === undefined) {
+        SLOT.value = [];
+        Object.defineProperty(this, '_skeys', SLOT);
+        SLOT.value = [];
+        Object.defineProperty(this, '_svals', SLOT);
+        SLOT.value = undefined;
+      }
+      this._skeys.push(key);
+      this._svals.push(value);
+    }
+    return this;
   }
   const id = this._id;
   // Overwrite: the hidden property is already there and writable, so a plain
   // store does it -- no isExtensible, no defineProperty, no descriptor.
-  if (Object.prototype.hasOwnProperty.call(key, id)) {
+  if (hasOwn.call(key, id)) {
     key[id] = value;
     return this;
   }
@@ -122,27 +195,48 @@ WeakMap.prototype.set = function (this: any, key: any, value: any): any {
 };
 
 WeakMap.prototype.get = function (this: any, key: any): any {
-  // inlined: isObjectLike(key)
-  if ((key === null || (typeof key !== 'object' && typeof key !== 'function')) || !Object.prototype.hasOwnProperty.call(key, this._id)) {
+  requireWeakMap(this, 'get');
+  if (typeof key === 'symbol') {
+    const at = symbolIndex(this, key);
+    return at === -1 ? undefined : this._svals[at];
+  }
+  if (!isObject(key) || !hasOwn.call(key, this._id)) {
     return undefined;
   }
   return key[this._id];
 };
 
 WeakMap.prototype.has = function (this: any, key: any): boolean {
-  return (
-    key !== null && (typeof key === 'object' || typeof key === 'function') && Object.prototype.hasOwnProperty.call(key, this._id)
-  );
+  requireWeakMap(this, 'has');
+  if (typeof key === 'symbol') return symbolIndex(this, key) !== -1;
+  return isObject(key) && hasOwn.call(key, this._id);
 };
 
 WeakMap.prototype.delete = function (this: any, key: any): boolean {
-  // inlined: isObjectLike(key)
-  if ((key === null || (typeof key !== 'object' && typeof key !== 'function')) || !Object.prototype.hasOwnProperty.call(key, this._id)) {
+  requireWeakMap(this, 'delete');
+  if (typeof key === 'symbol') {
+    const at = symbolIndex(this, key);
+    if (at === -1) return false;
+    this._skeys.splice(at, 1);
+    this._svals.splice(at, 1);
+    return true;
+  }
+  if (!isObject(key) || !hasOwn.call(key, this._id)) {
     return false;
   }
   delete key[this._id];
   return true;
 };
+
+// Methods non-enumerable, writable and configurable, with their spec names.
+const weakMapMethods = ['set', 'get', 'has', 'delete'];
+for (let i = 0; i < weakMapMethods.length; i++) {
+  const fn = (WeakMap.prototype as any)[weakMapMethods[i]];
+  try {
+    Object.defineProperty(fn, 'name', { value: weakMapMethods[i], configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(WeakMap.prototype, weakMapMethods[i], { value: fn, writable: true, enumerable: false, configurable: true });
+}
 
 if (hasSymbol) {
   Object.defineProperty(WeakMap.prototype, (Symbol as any).toStringTag, { value: 'WeakMap', writable: false, enumerable: false, configurable: true });

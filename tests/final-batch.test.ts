@@ -1,4 +1,4 @@
-import { wrapErrorConstructor } from '../src/modules/es.error.cause.js';
+import { wrapErrorConstructor, install as installErrorCause } from '../src/modules/es.error.cause.js';
 import {
   mathF16round,
   dataViewGetFloat16,
@@ -9,8 +9,56 @@ import {
 import { mathSumPrecise } from '../src/modules/es.math.sum-precise.js';
 import { arrayFromAsync } from '../src/modules/es.array.from-async.js';
 
+describe('Error cause install', () => {
+  // Chrome 38: the wrap runs after AggregateError was built on the native Error
+  it('re-points NativeErrors and earlier subclasses at the wrapped Error', () => {
+    const w: any = window;
+    const names = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'EvalError', 'URIError'];
+    const saved = names.map((n) => w[n]);
+    const savedCtors = names.map((n) => w[n].prototype.constructor);
+    const savedAE = w.AggregateError;
+    const AE: any = function AggregateError() {};
+    Object.setPrototypeOf(AE, w.Error);
+    w.AggregateError = AE;
+    try {
+      installErrorCause();
+      expect(Object.getPrototypeOf(w.TypeError)).toBe(w.Error);
+      expect(Object.getPrototypeOf(AE)).toBe(w.Error);
+      expect(w.Error).not.toBe(saved[0]);
+    } finally {
+      names.forEach((n, i) => {
+        w[n] = saved[i];
+        Object.defineProperty(saved[i].prototype, 'constructor', { value: savedCtors[i], writable: true, enumerable: false, configurable: true });
+      });
+      w.AggregateError = savedAE;
+    }
+  });
+});
+
 describe('Error cause', () => {
   const Wrapped: any = wrapErrorConstructor(TypeError);
+
+  it('names each wrapper after its error and keeps the spec length of 1', () => {
+    const names = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'EvalError', 'URIError'];
+    const w: any = window;
+    for (const name of names) {
+      const ctor = w[name];
+      const savedCtor = ctor.prototype.constructor;
+      try {
+        const named: any = wrapErrorConstructor(ctor);
+        // includes, not toBe: esbuild and swc rename a function that shadows a
+        // global the bundle uses, so built output names the shell TypeError2 /
+        // TypeError1 (core-js's wrappers get the same treatment). Accepted, no
+        // restore step: what matters is that it no longer says "Wrapped".
+        expect(named.name.includes(name)).toBe(true);
+        expect(named.length).toBe(1);
+        expect(new named('m', { cause: 1 }).cause).toBe(1);
+        expect(new named('m') instanceof ctor).toBe(true);
+      } finally {
+        Object.defineProperty(ctor.prototype, 'constructor', { value: savedCtor, writable: true, enumerable: false, configurable: true });
+      }
+    }
+  });
 
   it('reads cause off the options bag', () => {
     expect(new Wrapped('boom', { cause: 42 }).cause).toBe(42);

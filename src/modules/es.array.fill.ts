@@ -14,12 +14,10 @@ const min = Math.min;
 const ceil = Math.ceil;
 const floor = Math.floor;
 
-export const arrayFill = function <T>(
-  this: T[],
-  value: T,
-  start?: number,
-  end?: number,
-): T[] {
+// Declared (value) for the spec length of 1; start and end come from arguments.
+export const arrayFill = function fill(this: any, value: any): any {
+  const start = arguments.length > 1 ? arguments[1] : undefined;
+  const end = arguments.length > 2 ? arguments[2] : undefined;
   // inlined: toObject(this)
   if (this === null || this === undefined) {
     throw new TypeError('Array.prototype.fill called on null or undefined');

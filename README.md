@@ -21,6 +21,16 @@ With Spackle, the garbage collector runs less often, which means less stop-the-w
 
 Measurements and method: [docs/metrics.md](docs/metrics.md).
 
+## Tested against the spec
+
+- **3,268 conformance tests**, many ported from [test262](https://github.com/tc39/test262)
+  (the official ECMAScript test suite), run in real Chromium and WebKit.
+- **The test262 suite itself** for the newer proposals (iterator helpers, base64,
+  `getOrInsert`, explicit resource management, `Array.fromAsync`, `Math.sumPrecise`
+  and others): **685 of 732 pass (94%)**, with the browser's own implementations
+  removed first so spackle's versions are the ones tested.
+- Gaps are documented in each module under "Known limitations".
+
 ## Install
 
 ```sh

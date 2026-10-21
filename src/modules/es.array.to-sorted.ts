@@ -13,13 +13,26 @@ export const isSupported = (): boolean => {
 
 // Bottom-up merge sort, inlined: stable (V8's sort wasn't until Chrome 70), one
 // aux buffer, no recursion.
-const stableSort = (items: any[], compareFn: ((a: any, b: any) => number) | undefined): void => {
-  const length = items.length;
+// One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
+// cleared after each run so it never pins an element.
+const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+// CreateDataPropertyOrThrow, the fast way when it is the same thing: on an array
+// this call created, with nothing at that index up the prototype chain, a plain
+// write cannot hit a setter or a read-only slot. Anything else (a @@species or
+// `this` constructor's object, an index defined on Array.prototype) goes through
+// defineProperty, as the spec requires. core-js always pays for defineProperty.
+const ArrayProto = Array.prototype;
+
+// Bottom-up merge sort, inlined: stable (V8's sort wasn't until Chrome 70), one
+// aux buffer, no recursion. The lists are null-prototype objects: they are
+// spec-internal, so no write may reach a setter on Array/Object.prototype.
+// Returns whichever buffer holds the result.
+const stableSort = (items: any, length: number, compareFn: any): any => {
   if (length < 2) {
-    return;
+    return items;
   }
   let source = items;
-  let target = new Array(length);
+  let target: any = Object.create(null);
   for (let width = 1; width < length; width *= 2) {
     for (let start = 0; start < length; start += width * 2) {
       let left = start;
@@ -29,7 +42,7 @@ const stableSort = (items: any[], compareFn: ((a: any, b: any) => number) | unde
       let out = start;
       while (left < middle && right < end) {
         // `<= 0` keeps equal items in first-seen order
-        // inlined: sortCompare(compareFn, a, b)
+        // inlined: SortCompare(compareFn, a, b) -- undefineds sort last, unseen by the comparator
         const a = source[left];
         const b = source[right];
         let order: number;
@@ -62,32 +75,37 @@ const stableSort = (items: any[], compareFn: ((a: any, b: any) => number) | unde
     source = target;
     target = swap;
   }
-  // after an odd number of passes the result lives in the buffer — copy home
-  if (source !== items) {
-    for (let i = 0; i < length; i++) {
-      items[i] = source[i];
-    }
-  }
+  return source;
 };
 
-export const arrayToSorted = function <T>(
-  this: ArrayLike<T>,
-  compareFn?: (a: T, b: T) => number
-): T[] {
-  if (compareFn !== undefined && typeof compareFn !== 'function') {
+// Declared (comparefn) for the spec length of 1.
+export const arrayToSorted = function toSorted(this: any, comparefn?: any): any[] {
+  if (comparefn !== undefined && typeof comparefn !== 'function') {
     throw new TypeError('The comparison function must be either a function or undefined');
+  }
+  if (this === null || this === undefined) {
+    throw new TypeError('Array.prototype.toSorted called on null or undefined');
   }
   // box it so strings / array-likes behave like real arrays
   const object = Object(this);
   // inlined: toLength(object.length)
   let length = +object.length;
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
-  // dense copy first so the original is never mutated (holes read as undefined)
-  const items: T[] = new Array(length);
+  // ArrayCreate(len) first: RangeError past 2^32-1 before anything is read
+  const result: any[] = new Array(length);
+  // read every index once, holes as undefined, into an internal list
+  let items: any = Object.create(null);
   for (let i = 0; i < length; i++) {
     items[i] = object[i];
   }
-  stableSort(items, compareFn);
-  return items;
+  items = stableSort(items, length, comparefn);
+  for (let i = 0; i < length; i++) {
+    if (!(i in ArrayProto)) result[i] = items[i];
+    else {
+      dataDesc.value = items[i];
+      Object.defineProperty(result, i, dataDesc);
+    }
+  }
+  dataDesc.value = undefined;
+  return result;
 };
-

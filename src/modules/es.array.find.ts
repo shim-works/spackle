@@ -9,25 +9,19 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.find */
 
-export const arrayFind = function <T>(
-  this: T[],
-  predicate: (value: T, index: number, array: T[]) => boolean,
-  thisArg?: any,
-): T | undefined {
-  if (typeof predicate !== 'function') {
-    throw new TypeError('Array.prototype.find: predicate must be a function');
-  }
-
-  // Capture length once: elements appended during iteration are not visited.
-  // inlined: toLength(this.length)
-  let length = +this.length;
+// Declared (callbackfn) only, for the spec length of 1; thisArg comes from arguments.
+export const arrayFind = function find(this: any, callbackfn: any): any {
+  // inlined: ToObject(this)
+  if (this === null || this === undefined) throw new TypeError('Array.prototype.find called on null or undefined');
+  const O = Object(this);
+  // inlined: ToLength(Get(O, "length")) -- before the callback check, as the spec orders it
+  let length = +O.length;
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
-  for (let i = 0; i < length; i++) {
-    const value = this[i];
-    if (predicate.call(thisArg, value, i, this)) {
-      return value;
-    }
+  if (typeof callbackfn !== 'function') throw new TypeError('Array.prototype.find: callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = 0; k < length; k++) {
+    const kValue = O[k];
+    if (callbackfn.call(thisArg, kValue, k, O)) return kValue;
   }
   return undefined;
 };
-

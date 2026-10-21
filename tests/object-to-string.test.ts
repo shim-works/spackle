@@ -45,3 +45,27 @@ describe('Object.prototype.toString island — test262 conformance', () => {
     }
   });
 });
+
+describe('Object.prototype.toString island — @@toStringTag getter errors', () => {
+  it('propagates an error thrown by the tag getter (get-symbol-tag-err.js)', () => {
+    const boom = new Error('boom');
+    const o = Object.defineProperty({}, Symbol.toStringTag, { get() { throw boom; } });
+    expect(() => objectToString.call(o)).toThrow(boom);
+  });
+
+  it('swallows only a SecurityError (cross-origin window), falling back to the builtin tag', () => {
+    const security = new Error('blocked');
+    security.name = 'SecurityError';
+    // Throws on the first read only: the island then falls back to the native
+    // toString, which on these test engines reads the tag again (Chrome 41's
+    // native ignores it).
+    let reads = 0;
+    const o = Object.defineProperty({}, Symbol.toStringTag, {
+      get() {
+        if (reads++ === 0) throw security;
+        return undefined;
+      },
+    });
+    expect(objectToString.call(o)).toBe('[object Object]');
+  });
+});

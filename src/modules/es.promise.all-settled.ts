@@ -6,87 +6,154 @@ export const isSupported = (): boolean => {
   }
 };
 
-/**
- * Spec: https://tc39.es/ecma262/#sec-promise.allsettled
- *
- * Known limitations:
- * - [incomplete] Accepts arrays, array-likes, and forEach-bearing iterables (Map/Set);
- *   generic Symbol.iterator-only iterables are not supported on the ES5 baseline.
+/** Spec: https://tc39.es/ecma262/#sec-promise.allsettled */
+
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+const hasOwn = Object.prototype.hasOwnProperty;
+// IsConstructor, best ES5 approximation: ordinary and built-in constructors carry
+// an own prototype; bound functions are constructors without one.
+const isConstructor = (C: any): boolean =>
+  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
+
+/*
+ * Built-in closures (resolve element functions, capability wrappers) are not
+ * constructors and have no prototype. ES5 function expressions always are, so
+ * where the engine parses arrows, wrap in one (length 1, name '').
  */
+let arrowWrap: any = null;
+try {
+  arrowWrap = new Function('f', 'return (x) => f(x)');
+} catch (e) {
+  /* no arrow syntax (or CSP): plain functions, the ES5 best */
+}
+const builtinClosure = (fn: (x: any) => any): any =>
+  arrowWrap ? arrowWrap(fn) : function (x: any) { return fn(x); };
 
-// once-flag for the generic-iterable warn below
-let warnedGenericIterable = false;
-
-const settle = (
-  PromiseCtor: PromiseConstructor,
-  item: any,
-  index: number,
-  results: any[],
-  done: () => void
-): void => {
-  PromiseCtor.resolve(item).then(
-    function (value: any) {
-      results[index] = { status: 'fulfilled', value: value };
-      done();
-    },
-    function (reason: any) {
-      results[index] = { status: 'rejected', reason: reason };
-      done();
-    }
-  );
+// NewPromiseCapability(C), with GetCapabilitiesExecutor's checks.
+const newPromiseCapability = (C: any): any => {
+  if (!isConstructor(C)) throw new TypeError('Promise capability: not a constructor');
+  const capability: any = { promise: undefined, resolve: undefined, reject: undefined };
+  const executor = function (resolve: any, reject: any): void {
+    if (capability.resolve !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
+    if (capability.reject !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
+    capability.resolve = resolve;
+    capability.reject = reject;
+  };
+  capability.promise = new C(executor);
+  if (typeof capability.resolve !== 'function') throw new TypeError('Promise resolve function is not callable');
+  if (typeof capability.reject !== 'function') throw new TypeError('Promise reject function is not callable');
+  return capability;
 };
 
-export const promiseAllSettled = function (this: any, iterable: any) {
-  // native-first via species: use the constructor we're called on (Promise, or
-  // a subclass); fall back to the global Promise, which is native when present
-  let PromiseCtor: PromiseConstructor = Promise as PromiseConstructor;
-  if (typeof this === 'function') {
-    PromiseCtor = this;
+// IteratorClose after an abrupt step on our side; the original error wins.
+const closeIterator = (iterator: any): void => {
+  try {
+    const ret = iterator['return'];
+    if (ret !== undefined && ret !== null) ret.call(iterator);
+  } catch (e) {
+    /* the original error wins */
   }
-  return new PromiseCtor(function (resolve: any, reject: any) {
-    if (iterable == null) {
-      reject(
-        new TypeError(
-          'Promise.allSettled requires an array-like or iterable argument'
-        )
-      );
-      return;
-    }
-// inlined: toArray(iterable) -- arrays, array-likes, and forEach-bearing iterables
-    const items: any[] = [];
-    // inlined: isArrayLike(iterable) -- takes the cheap index loop
-    if (typeof iterable !== 'function' && typeof iterable.length === 'number') {
-      for (let i = 0; i < iterable.length; i++) {
-        items[items.length] = iterable[i];
-      }
-    } else if (typeof iterable.forEach === 'function') {
-      iterable.forEach(function (value: any) {
-        items[items.length] = value;
-      });
-    } else if (!warnedGenericIterable) {
-      // the [incomplete] gap from the header, hit at runtime — say so
-      warnedGenericIterable = true;
-      console.warn(
-        '[spackle] Promise.allSettled: generic iterables are not implemented — only arrays, array-likes and forEach-bearing collections; treating as empty'
-      );
-    }
-    const total = items.length;
-    const results = new Array(total);
-    let remaining = total;
-    // empty input settles immediately with an empty result list
-    if (remaining === 0) {
-      resolve(results);
-      return;
-    }
-    // fire them all off; the last one to finish resolves the outer promise
-    for (let i = 0; i < total; i++) {
-      settle(PromiseCtor, items[i], i, results, function () {
-        remaining--;
-        if (remaining === 0) {
-          resolve(results);
-        }
-      });
-    }
-  });
 };
 
+// One description per combinator call: an iterator and its next, or (engines
+// without Symbol, where nothing else is iterable) an array-like walked by index.
+const getIteratorRecord = (iterable: any): any => {
+  const key = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+  if (key) {
+    if (iterable === null || iterable === undefined) throw new TypeError('object is not iterable');
+    const method = iterable[key];
+    if (typeof method !== 'function') throw new TypeError('object is not iterable');
+    const iterator = method.call(iterable);
+    if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+    return { iterator: iterator, next: iterator.next, arrayLike: null, index: 0, done: false };
+  }
+  if (iterable === null || iterable === undefined || typeof iterable.length !== 'number') {
+    throw new TypeError('object is not iterable');
+  }
+  return { iterator: null, next: null, arrayLike: iterable, index: 0, done: false };
+};
+
+// IteratorStepValue: returns DONE at the end; protocol errors mark the record
+// done (so it is not closed) and propagate.
+const DONE = {};
+const stepValue = (record: any): any => {
+  if (record.arrayLike !== null) {
+    if (record.index >= record.arrayLike.length) {
+      record.done = true;
+      return DONE;
+    }
+    return record.arrayLike[record.index++];
+  }
+  try {
+    const result = record.next.call(record.iterator);
+    if (!isObject(result)) throw new TypeError('Iterator result is not an object');
+    if (result.done) {
+      record.done = true;
+      return DONE;
+    }
+    return result.value;
+  } catch (error) {
+    record.done = true;
+    throw error;
+  }
+};
+
+// One descriptor for CreateArrayFromList, reused; cleared after each list.
+const LIST: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+const arrayFromList = (list: any, length: number): any[] => {
+  const out: any[] = [];
+  for (let i = 0; i < length; i++) {
+    LIST.value = list[i];
+    Object.defineProperty(out, i, LIST);
+  }
+  LIST.value = undefined;
+  return out;
+};
+
+export const promiseAllSettled = function allSettled(this: any, iterable: any) {
+  const C = this;
+  const capability = newPromiseCapability(C);
+  let record: any = null;
+  try {
+    // GetPromiseResolve(C) before GetIterator: a bad resolve never opens the iterable
+    const promiseResolve = C.resolve;
+    if (typeof promiseResolve !== 'function') throw new TypeError('Promise resolve is not callable');
+    record = getIteratorRecord(iterable);
+    // internal list: a null-prototype object, so no index write reaches a setter
+    const values: any = Object.create(null);
+    let count = 0;
+    let remaining = 1;
+    for (;;) {
+      const value = stepValue(record);
+      if (value === DONE) {
+        if (--remaining === 0) capability.resolve(arrayFromList(values, count));
+        return capability.promise;
+      }
+      const index = count++;
+      values[index] = undefined;
+      const nextPromise = promiseResolve.call(C, value);
+      let alreadyCalled = false;
+      const onFulfilled = builtinClosure(function (x: any) {
+        if (alreadyCalled) return undefined;
+        alreadyCalled = true;
+        values[index] = { status: 'fulfilled', value: x };
+        if (--remaining === 0) return capability.resolve(arrayFromList(values, count));
+        return undefined;
+      });
+      const onRejected = builtinClosure(function (x: any) {
+        if (alreadyCalled) return undefined;
+        alreadyCalled = true;
+        values[index] = { status: 'rejected', reason: x };
+        if (--remaining === 0) return capability.resolve(arrayFromList(values, count));
+        return undefined;
+      });
+      remaining++;
+      nextPromise.then(onFulfilled, onRejected);
+    }
+  } catch (error) {
+    if (record !== null && !record.done && record.iterator !== null) closeIterator(record.iterator);
+    capability.reject(error);
+    return capability.promise;
+  }
+};

@@ -97,14 +97,15 @@ describe('the splice pass', () => {
     }
   });
 
-  it('reaches spackle\'s own shim iterators — the Chrome 45-65 case', () => {
+  it('reaches values() in the Chrome 45-65 case', () => {
     // Chrome 45-65 has a real %IteratorPrototype%, but Array.prototype.values
-    // landed in Chrome 66, so values() is spackle's and inherits nothing.
+    // landed in Chrome 66. As in core-js, values() is then the native
+    // @@iterator, so it hands out the engine's own array iterators.
     const native = Array.prototype.values;
     delete (Array.prototype as any).values;
     try {
       installArrayIterator();
-      expect((Array.prototype.values as any).__polyfilled).toBe(true);
+      expect(Array.prototype.values).toBe((Array.prototype as any)[Symbol.iterator]);
 
       installIteratorImpl();
 
@@ -137,3 +138,28 @@ describe('the splice pass', () => {
 // The synthesis path — where the engine has no %IteratorPrototype% at all —
 // needs the module re-evaluated with the chain already broken, so it lives in
 // iterator-prototype-synthesis.test.ts, which the browser bundle skips.
+
+// Chrome 41 keeps its native String/Map/Set iterators but never tagged them.
+describe('the splice pass tags native iterator prototypes (core-js iterator-define)', () => {
+  const TAG = Symbol.toStringTag;
+  const cases: Array<[string, () => any]> = [
+    ['String Iterator', () => ('' as any)[Symbol.iterator]()],
+    ['Map Iterator', () => new Map()[Symbol.iterator]()],
+    ['Set Iterator', () => new Set()[Symbol.iterator]()],
+  ];
+  for (const [tag, sample] of cases) {
+    it(`tags an untagged native ${tag}`, () => {
+      const proto = Object.getPrototypeOf(sample());
+      const saved = Object.getOwnPropertyDescriptor(proto, TAG);
+      try {
+        delete proto[TAG];
+        installIteratorImpl();
+        const d = Object.getOwnPropertyDescriptor(proto, TAG)!;
+        expect(d.value).toBe(tag);
+        expect([d.writable, d.enumerable, d.configurable]).toEqual([false, false, true]);
+      } finally {
+        if (saved) Object.defineProperty(proto, TAG, saved);
+      }
+    });
+  }
+});

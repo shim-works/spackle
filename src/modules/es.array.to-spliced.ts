@@ -13,14 +13,22 @@ export const isSupported = (): boolean => {
 
 const MAX_SAFE_LENGTH = 9007199254740991; // 2^53 - 1
 
-export const arrayToSpliced = function <T>(
-  this: ArrayLike<T>,
-  start?: number,
-  skipCount?: number,
-  // `arguments`, not a rest parameter (an array per call); `_items` keeps
-  // toSpliced.length at 2.
-  _items?: T
-): T[] {
+// One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
+// cleared after each run so it never pins an element.
+const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+// CreateDataPropertyOrThrow, the fast way when it is the same thing: on an array
+// this call created, with nothing at that index up the prototype chain, a plain
+// write cannot hit a setter or a read-only slot. Anything else (a @@species or
+// `this` constructor's object, an index defined on Array.prototype) goes through
+// defineProperty, as the spec requires. core-js always pays for defineProperty.
+const ArrayProto = Array.prototype;
+
+// Declared (start, skipCount) for the spec length of 2; the items come from
+// `arguments`, not a rest parameter (no array per call).
+export const arrayToSpliced = function toSpliced(this: any, start?: any, skipCount?: any): any[] {
+  if (this === null || this === undefined) {
+    throw new TypeError('Array.prototype.toSpliced called on null or undefined');
+  }
   // box it so strings / array-likes behave like real arrays
   const object = Object(this);
   // inlined: toLength(object.length)
@@ -60,25 +68,38 @@ export const arrayToSpliced = function <T>(
     throw new TypeError('Array length exceeded');
   }
 
-  const result: T[] = new Array(newLength);
+  const result: any[] = new Array(newLength);
   let writeIndex = 0;
   // copy the kept head
   while (writeIndex < actualStart) {
-    result[writeIndex] = object[writeIndex];
+    if (!(writeIndex in ArrayProto)) result[writeIndex] = object[writeIndex];
+    else {
+      dataDesc.value = object[writeIndex];
+      Object.defineProperty(result, writeIndex, dataDesc);
+    }
     writeIndex++;
   }
   // drop in the new items
   for (let i = 0; i < insertCount; i++) {
-    result[writeIndex] = arguments[i + 2];
+    if (!(writeIndex in ArrayProto)) result[writeIndex] = arguments[i + 2];
+    else {
+      dataDesc.value = arguments[i + 2];
+      Object.defineProperty(result, writeIndex, dataDesc);
+    }
     writeIndex++;
   }
   // copy the kept tail, skipping over the removed chunk
   let readFrom = actualStart + actualSkipCount;
   while (writeIndex < newLength) {
-    result[writeIndex] = object[readFrom];
+    if (!(writeIndex in ArrayProto)) result[writeIndex] = object[readFrom];
+    else {
+      dataDesc.value = object[readFrom];
+      Object.defineProperty(result, writeIndex, dataDesc);
+    }
     writeIndex++;
     readFrom++;
   }
+  dataDesc.value = undefined;
   return result;
 };
 

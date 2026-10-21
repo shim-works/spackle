@@ -25,6 +25,8 @@ export const isSupported = (): boolean => {
  */
 
 const hasOwn = Object.prototype.hasOwnProperty;
+const getOwnDesc = Object.getOwnPropertyDescriptor;
+const defineProp = Object.defineProperty;
 const getProto =
   Object.getPrototypeOf ||
   function (o: any) {
@@ -38,193 +40,273 @@ const setProto =
     return o;
   };
 
-// Walk the chain to the descriptor that owns `key`. Step-capped: a longer chain
-// is a cycle; give up with undefined rather than hang.
+// Step cap on every prototype walk: a chain longer than this is a cycle (an
+// engine let one land through `__proto__ =`), so give up instead of hanging --
+// Safari 7.1 died silently on an unbounded walk.
 const MAX_CHAIN = 100;
 
-export const Reflect = {
-  // apply/construct are the two exceptions: the spec checks callable and
-  // constructor respectively, which Function.prototype.apply/bind already do.
-  apply: function (target: any, thisArgument: any, argumentsList: any): any {
-    return Function.prototype.apply.call(target, thisArgument, argumentsList);
-  },
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
 
-  // No spread on the floor — bind a null-this constructor with the args spliced
-  // in, then `new` it. Re-point the prototype when a distinct newTarget is given.
-  construct: function (target: any, argumentsList: any, newTarget?: any): any {
-    const args = [null];
-    for (let i = 0; i < argumentsList.length; i++) {
-      args[args.length] = argumentsList[i];
-    }
-    const Bound = Function.prototype.bind.apply(target, args as any);
-    const instance = new Bound();
-    if (newTarget !== undefined && newTarget !== target && newTarget.prototype) {
-      setProto(instance, newTarget.prototype);
-    }
-    return instance;
-  },
+const requireObject = (target: any, method: string): void => {
+  if (!isObject(target)) throw new TypeError('Reflect.' + method + ' called on non-object');
+};
 
-  defineProperty: function (target: any, key: any, attributes: any): boolean {
-    // inlined: anObject(target, 'defineProperty')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.defineProperty called on non-object');
+// ToPropertyKey: ToPrimitive with hint string, then a Symbol stays a Symbol.
+const toPropertyKey = (key: any): any => {
+  if (isObject(key)) {
+    const toPrimitive = typeof Symbol !== 'undefined' && (Symbol as any).toPrimitive ? key[(Symbol as any).toPrimitive] : undefined;
+    let primitive: any;
+    if (toPrimitive !== undefined && toPrimitive !== null) {
+      primitive = toPrimitive.call(key, 'string');
+      if (isObject(primitive)) throw new TypeError('Cannot convert object to primitive value');
+    } else {
+      // OrdinaryToPrimitive(key, string): toString, then valueOf
+      const toStringFn = key.toString;
+      if (typeof toStringFn === 'function') primitive = toStringFn.call(key);
+      if (typeof toStringFn !== 'function' || isObject(primitive)) {
+        const valueOfFn = key.valueOf;
+        if (typeof valueOfFn === 'function') primitive = valueOfFn.call(key);
+        if (typeof valueOfFn !== 'function' || isObject(primitive)) {
+          throw new TypeError('Cannot convert object to primitive value');
+        }
+      }
+    }
+    key = primitive;
+  }
+  return typeof key === 'symbol' ? key : String(key);
+};
+
+// CreateListFromArrayLike: an Object, its length, each index read in order.
+const listFromArrayLike = (argumentsList: any): any[] => {
+  if (!isObject(argumentsList)) throw new TypeError('CreateListFromArrayLike called on non-object');
+  let length = +argumentsList.length;
+  length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
+  const list = new Array(length);
+  for (let i = 0; i < length; i++) list[i] = argumentsList[i];
+  return list;
+};
+
+// IsConstructor, best ES5 approximation: built-ins and ordinary functions carry
+// an own prototype; bound functions are constructors without one.
+const isConstructor = (C: any): boolean =>
+  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
+
+const nativeCodeRe = /\[native code\]/;
+const fnToString = Function.prototype.toString;
+
+// ToPropertyDescriptor: Has/Get each field in spec order, then validate.
+const toPropertyDescriptor = (attributes: any): any => {
+  if (!isObject(attributes)) throw new TypeError('Property description must be an object');
+  const desc: any = {};
+  if ('enumerable' in attributes) desc.enumerable = !!attributes.enumerable;
+  if ('configurable' in attributes) desc.configurable = !!attributes.configurable;
+  if ('value' in attributes) desc.value = attributes.value;
+  if ('writable' in attributes) desc.writable = !!attributes.writable;
+  if ('get' in attributes) {
+    const getter = attributes.get;
+    if (getter !== undefined && typeof getter !== 'function') throw new TypeError('Getter must be a function');
+    desc.get = getter;
+  }
+  if ('set' in attributes) {
+    const setter = attributes.set;
+    if (setter !== undefined && typeof setter !== 'function') throw new TypeError('Setter must be a function');
+    desc.set = setter;
+  }
+  if (('get' in desc || 'set' in desc) && ('value' in desc || 'writable' in desc)) {
+    throw new TypeError('Invalid property descriptor. Cannot both specify accessors and a value or writable attribute');
+  }
+  return desc;
+};
+
+// OrdinarySet(O, P, V, Receiver), walking the prototype chain without [[Set]].
+const ordinarySet = (target: any, key: any, value: any, receiver: any): boolean => {
+  let ownDesc: any = getOwnDesc(target, key);
+  let steps = 0;
+  while (ownDesc === undefined) {
+    const parent = getProto(target);
+    if (parent === null || ++steps > MAX_CHAIN) {
+      ownDesc = { value: undefined, writable: true, enumerable: true, configurable: true };
+      break;
+    }
+    target = parent;
+    ownDesc = getOwnDesc(target, key);
+  }
+  if ('value' in ownDesc || 'writable' in ownDesc) {
+    if (!ownDesc.writable || !isObject(receiver)) return false;
+    const existing: any = getOwnDesc(receiver, key);
+    if (existing !== undefined) {
+      if (existing.get !== undefined || existing.set !== undefined || !('value' in existing)) return false;
+      if (!existing.writable) return false;
+      try {
+        defineProp(receiver, key, { value: value });
+        return true;
+      } catch {
+        return false;
+      }
     }
     try {
-      Object.defineProperty(target, key, attributes);
+      defineProp(receiver, key, { value: value, writable: true, enumerable: true, configurable: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  if (ownDesc.set === undefined) return false;
+  ownDesc.set.call(receiver, value);
+  return true;
+};
+
+const methods: any = {
+  apply: function apply(target: any, thisArgument: any, argumentsList: any): any {
+    if (typeof target !== 'function') throw new TypeError('Reflect.apply target is not callable');
+    return Function.prototype.apply.call(target, thisArgument, listFromArrayLike(argumentsList));
+  },
+
+  // Declared (target, argumentsList) for the spec length of 2; newTarget from arguments.
+  construct: function construct(target: any, argumentsList: any): any {
+    if (!isConstructor(target)) throw new TypeError('Reflect.construct target is not a constructor');
+    const newTarget = arguments.length > 2 ? arguments[2] : target;
+    if (!isConstructor(newTarget)) throw new TypeError('Reflect.construct newTarget is not a constructor');
+    const args = listFromArrayLike(argumentsList);
+    if (newTarget === target || nativeCodeRe.test(fnToString.call(target))) {
+      // No spread on the floor: bind a null-this constructor with the args spliced
+      // in and `new` it, which keeps built-in exotic objects (Date, Array, Error).
+      const boundArgs = [null];
+      for (let i = 0; i < args.length; i++) boundArgs[i + 1] = args[i];
+      const Bound = Function.prototype.bind.apply(target, boundArgs as any);
+      const instance = new Bound();
+      if (newTarget !== target) {
+        const proto = newTarget.prototype;
+        if (isObject(proto)) setProto(instance, proto);
+      }
+      return instance;
+    }
+    // An ordinary function with a distinct newTarget: OrdinaryCreateFromConstructor
+    // first, so the body already sees newTarget.prototype.
+    let proto = newTarget.prototype;
+    if (!isObject(proto)) proto = Object.prototype;
+    const object = Object.create(proto);
+    const result = target.apply(object, args);
+    return isObject(result) ? result : object;
+  },
+
+  defineProperty: function defineProperty(target: any, key: any, attributes: any): boolean {
+    requireObject(target, 'defineProperty');
+    const propertyKey = toPropertyKey(key);
+    const desc = toPropertyDescriptor(attributes);
+    try {
+      defineProp(target, propertyKey, desc);
       return true;
     } catch (e) {
-      // Reflect.defineProperty reports failure as `false`, never throws.
+      // [[DefineOwnProperty]] reports failure as false; only conversions throw
       return false;
     }
   },
 
-  deleteProperty: function (target: any, key: any): boolean {
-    // inlined: anObject(target, 'deleteProperty')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.deleteProperty called on non-object');
-    }
+  deleteProperty: function deleteProperty(target: any, key: any): boolean {
+    requireObject(target, 'deleteProperty');
+    const propertyKey = toPropertyKey(key);
     try {
-      delete target[key];
-      return true;
+      return delete target[propertyKey];
     } catch (e) {
       return false;
     }
   },
 
-  get: function (target: any, key: any, receiver?: any): any {
-    // inlined: anObject(target, 'get')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.get called on non-object');
-    }
-    // inlined: findDescriptor(target, key)
-    let desc: any = undefined;
+  // Declared (target, propertyKey) for the spec length of 2; receiver from arguments.
+  get: function get(target: any, key: any): any {
+    requireObject(target, 'get');
+    const propertyKey = toPropertyKey(key);
+    const receiver = arguments.length > 2 ? arguments[2] : target;
     let owner = target;
     let steps = 0;
     while (owner !== null && owner !== undefined) {
-      if (hasOwn.call(owner, key)) {
-        desc = Object.getOwnPropertyDescriptor(owner, key);
-        break;
+      const desc: any = getOwnDesc(owner, propertyKey);
+      if (desc !== undefined) {
+        if ('value' in desc || 'writable' in desc) return desc.value;
+        return desc.get === undefined ? undefined : desc.get.call(receiver);
       }
       if (++steps > MAX_CHAIN) break;
       owner = getProto(owner);
     }
-    if (desc === undefined) {
-      return undefined;
-    }
-    // Accessor: invoke the getter bound to the receiver (defaults to target).
-    if (desc.get) {
-      return desc.get.call(receiver === undefined ? target : receiver);
-    }
-    return desc.value;
+    return undefined;
   },
 
-  getOwnPropertyDescriptor: function (target: any, key: any): any {
-    // inlined: anObject(target, 'getOwnPropertyDescriptor')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.getOwnPropertyDescriptor called on non-object');
-    }
-    return Object.getOwnPropertyDescriptor(target, key);
+  getOwnPropertyDescriptor: function getOwnPropertyDescriptor(target: any, key: any): any {
+    requireObject(target, 'getOwnPropertyDescriptor');
+    return getOwnDesc(target, toPropertyKey(key));
   },
 
-  getPrototypeOf: function (target: any): any {
-    // inlined: anObject(target, 'getPrototypeOf')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.getPrototypeOf called on non-object');
-    }
+  getPrototypeOf: function getPrototypeOf(target: any): any {
+    requireObject(target, 'getPrototypeOf');
     return getProto(target);
   },
 
-  has: function (target: any, key: any): boolean {
-    // inlined: anObject(target, 'has')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.has called on non-object');
-    }
-    return key in target;
+  has: function has(target: any, key: any): boolean {
+    requireObject(target, 'has');
+    return toPropertyKey(key) in target;
   },
 
-  isExtensible: function (target: any): boolean {
-    // inlined: anObject(target, 'isExtensible')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.isExtensible called on non-object');
-    }
+  isExtensible: function isExtensible(target: any): boolean {
+    requireObject(target, 'isExtensible');
     return Object.isExtensible(target);
   },
 
-  ownKeys: function (target: any): any[] {
-    // inlined: anObject(target, 'ownKeys')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.ownKeys called on non-object');
-    }
-    const keys = Object.getOwnPropertyNames(target);
+  ownKeys: function ownKeys(target: any): any[] {
+    requireObject(target, 'ownKeys');
+    const keys: any[] = Object.getOwnPropertyNames(target);
     // Append Symbol keys only when the runtime actually has Symbols.
     if (typeof Object.getOwnPropertySymbols === 'function') {
       const symbols = Object.getOwnPropertySymbols(target);
-      for (let i = 0; i < symbols.length; i++) {
-        keys[keys.length] = symbols[i] as any;
-      }
+      for (let i = 0; i < symbols.length; i++) keys.push(symbols[i]);
     }
     return keys;
   },
 
-  preventExtensions: function (target: any): boolean {
-    // inlined: anObject(target, 'preventExtensions')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.preventExtensions called on non-object');
-    }
-    try {
-      Object.preventExtensions(target);
-      return true;
-    } catch (e) {
-      return false;
-    }
+  preventExtensions: function preventExtensions(target: any): boolean {
+    requireObject(target, 'preventExtensions');
+    Object.preventExtensions(target);
+    return true;
   },
 
-  set: function (target: any, key: any, value: any, receiver?: any): boolean {
-    // inlined: anObject(target, 'set')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.set called on non-object');
-    }
-    const dest = receiver === undefined ? target : receiver;
-    // inlined: findDescriptor(target, key)
-    let desc: any = undefined;
-    let owner = target;
+  // Declared (target, propertyKey, V) for the spec length of 3; receiver from arguments.
+  set: function set(target: any, key: any, value: any): boolean {
+    requireObject(target, 'set');
+    const propertyKey = toPropertyKey(key);
+    return ordinarySet(target, propertyKey, value, arguments.length > 3 ? arguments[3] : target);
+  },
+
+  setPrototypeOf: function setPrototypeOf(target: any, proto: any): boolean {
+    requireObject(target, 'setPrototypeOf');
+    if (proto !== null && !isObject(proto)) throw new TypeError('Object prototype may only be an Object or null');
+    const current = getProto(target);
+    if (current === proto) return true;
+    if (!Object.isExtensible(target)) return false;
+    // OrdinarySetPrototypeOf refuses a cycle
     let steps = 0;
-    while (owner !== null && owner !== undefined) {
-      if (hasOwn.call(owner, key)) {
-        desc = Object.getOwnPropertyDescriptor(owner, key);
-        break;
-      }
-      if (++steps > MAX_CHAIN) break;
-      owner = getProto(owner);
-    }
-    try {
-      // Accessor: drive the setter on the receiver.
-      if (desc && desc.set) {
-        desc.set.call(dest, value);
-        return true;
-      }
-      // A getter-only accessor has no setter — write must fail.
-      if (desc && desc.get && !desc.set) {
-        return false;
-      }
-      dest[key] = value;
-      return true;
-    } catch (e) {
-      return false;
-    }
-  },
-
-  setPrototypeOf: function (target: any, proto: any): boolean {
-    // inlined: anObject(target, 'setPrototypeOf')
-    if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
-      throw new TypeError('Reflect.setPrototypeOf called on non-object');
+    for (let p = proto; p !== null && p !== undefined && ++steps <= MAX_CHAIN; p = getProto(p)) {
+      if (p === target) return false;
     }
     try {
       setProto(target, proto);
-      return true;
     } catch (e) {
       return false;
     }
+    return getProto(target) === proto;
   },
 };
 
+// The Reflect namespace: an ordinary object whose methods are non-enumerable,
+// writable and configurable, with their spec names (the bundler may rename).
+export const Reflect: any = {};
+for (const name in methods) {
+  if (!hasOwn.call(methods, name)) continue;
+  try {
+    defineProp(methods[name], 'name', { value: name, configurable: true });
+  } catch (e) {
+    /* Function#name non-configurable pre-ES6 */
+  }
+  defineProp(methods[name], '__polyfilled', { value: true });
+  defineProp(Reflect, name, { value: methods[name], writable: true, enumerable: false, configurable: true });
+}

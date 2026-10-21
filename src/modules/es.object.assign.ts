@@ -67,6 +67,9 @@ export const objectAssign = function (target: any, _source?: any): any {
   }
 
   const to = Object(target);
+  // A String target's indices are read-only, so Set throws there -- but Chrome
+  // < 41 ignores those writes even in strict code. -1 when not a string.
+  const stringLength = typeof target === 'string' ? target.length : -1;
   for (let index = 1; index < arguments.length; index++) {
     const nextSource = arguments[index];
     if (nextSource == null) {
@@ -75,6 +78,9 @@ export const objectAssign = function (target: any, _source?: any): any {
 
     for (const key in nextSource) {
       if (hasOwn.call(nextSource, key)) {
+        if (stringLength > 0 && String(+key >>> 0) === key && +key < stringLength) {
+          throw new TypeError("Cannot assign to read only property '" + key + "' of string");
+        }
         to[key] = nextSource[key];
       }
     }

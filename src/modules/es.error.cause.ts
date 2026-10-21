@@ -1,11 +1,12 @@
 // Behavioral, not existence: the Error constructors have always existed --
 // what's new is honouring the options bag. An existence check would never fire.
+// Reached through window, never by bare name: esbuild renames a declaration that
+// shadows a global the same file uses, which would turn the shells' `function
+// Error` below into `Error2`.
 export const isSupported = (): boolean => {
   try {
-    return (
-      (new Error('m', { cause: 1 } as any) as any).cause === 1 &&
-      (new TypeError('m', { cause: 1 } as any) as any).cause === 1
-    );
+    const w: any = window;
+    return new w.Error('m', { cause: 1 }).cause === 1 && new w.TypeError('m', { cause: 1 }).cause === 1;
   } catch {
     return false;
   }
@@ -26,17 +27,59 @@ export const isSupported = (): boolean => {
 // Reused descriptor: no allocation per call.
 const CAUSE: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 
+// The one body every shell below runs.
+const build = function (Native: any, message: any, options: any): any {
+  const error = message === undefined ? new Native() : new Native(message);
+  // inlined: setCause(error, options)
+  if (options !== null && typeof options === 'object' && 'cause' in options) {
+    CAUSE.value = options.cause;
+    Object.defineProperty(error, 'cause', CAUSE);
+    CAUSE.value = undefined; // never pin the last cause
+  }
+  return error;
+};
+
+/*
+ * One named shell per constructor. Chrome < 43 and Safari 7.1 can't redefine a
+ * function's name or length, so both come from the source: the name from the
+ * function expression, the spec length of 1 from the one declared param (core-js
+ * builds its wrappers the same way). options is read from arguments, which is
+ * never passed on. esbuild and swc rename a shell that shadows a global the
+ * bundle uses (TypeError2): accepted, core-js's wrappers get the same.
+ */
+const SHELLS: { [name: string]: (Native: any) => any } = {
+  Error: function (N: any) {
+    return function Error(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+  TypeError: function (N: any) {
+    return function TypeError(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+  RangeError: function (N: any) {
+    return function RangeError(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+  SyntaxError: function (N: any) {
+    return function SyntaxError(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+  ReferenceError: function (N: any) {
+    return function ReferenceError(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+  EvalError: function (N: any) {
+    return function EvalError(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+  URIError: function (N: any) {
+    return function URIError(message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+  },
+};
+
+// Any other constructor (a test's own): same body, no name to give it.
+const anonymousShell = function (N: any) {
+  return function (message?: any) { return build(N, message, arguments.length > 1 ? arguments[1] : undefined); };
+};
+
 export const wrapErrorConstructor = function (Native: any): any {
-  const Wrapped = function (this: any, message?: any, options?: any): any {
-    const error = message === undefined ? new Native() : new Native(message);
-    // inlined: setCause(error, options)
-    if (options !== null && typeof options === 'object' && 'cause' in options) {
-      CAUSE.value = options.cause;
-      Object.defineProperty(error, 'cause', CAUSE);
-      CAUSE.value = undefined; // never pin the last cause
-    }
-    return error;
-  } as any;
+  // Native constructors keep their real name on every engine in range.
+  const shell = Object.prototype.hasOwnProperty.call(SHELLS, Native.name) ? SHELLS[Native.name] : anonymousShell;
+  const Wrapped = shell(Native) as any;
 
   // Same prototype OBJECT, not a copy -- this is the whole trick.
   Wrapped.prototype = Native.prototype;
@@ -87,6 +130,7 @@ export const install = (): void => {
       'EvalError',
       'URIError',
     ];
+    const NativeError = (window as any).Error;
     for (let i = 0; i < targets.length; i++) {
       const name = targets[i];
       const Native = (window as any)[name];
@@ -94,6 +138,29 @@ export const install = (): void => {
       const Wrapped = wrapErrorConstructor(Native);
       Object.defineProperty((window as any), name, { value: Wrapped, writable: true, enumerable: false, configurable: true });
       Object.defineProperty(Wrapped, '__polyfilled', { value: true });
+    }
+    /*
+     * Every NativeError's [[Prototype]] is %Error% -- now the wrapper. Re-point
+     * the wrapped ones, and the subclasses built on the native before this ran
+     * (AggregateError, SuppressedError).
+     */
+    const WrappedError = (window as any).Error;
+    if (NativeError !== WrappedError) {
+      const setProto =
+        Object.setPrototypeOf ||
+        function (target: any, proto: any) {
+          target.__proto__ = proto;
+          return target;
+        };
+      const children = targets.slice(1).concat(['AggregateError', 'SuppressedError']);
+      for (let i = 0; i < children.length; i++) {
+        const ctor = (window as any)[children[i]];
+        if (typeof ctor !== 'function') continue;
+        const wrapped = i < targets.length - 1;
+        try {
+          if (wrapped || Object.getPrototypeOf(ctor) === NativeError) setProto(ctor, WrappedError);
+        } catch (e) { /* engine refuses: instanceof still holds */ }
+      }
     }
   }
 };

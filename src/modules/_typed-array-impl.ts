@@ -120,319 +120,109 @@ export const isSupported = (): boolean => {
   }
 };
 
-export const typedArrayFind = function (
-  this: any,
-  predicate: Function,
-  thisArg?: any,
-) {
-  // spec: a non-callable predicate is a TypeError even on an empty array
-  // inlined: assertCallable(predicate)
-  if (typeof predicate !== "function") throw new TypeError(predicate + " is not a function");
-  for (let i = 0; i < this.length; i++) {
-    if (predicate.call(thisArg, this[i], i, this)) {
-      return this[i];
-    }
-  }
-  return undefined;
-};
-
-export const typedArrayFindIndex = function (
-  this: any,
-  predicate: Function,
-  thisArg?: any,
-) {
-  // inlined: assertCallable(predicate)
-  if (typeof predicate !== "function") throw new TypeError(predicate + " is not a function");
-  for (let i = 0; i < this.length; i++) {
-    if (predicate.call(thisArg, this[i], i, this)) {
-      return i;
-    }
-  }
-  return -1;
-};
-
-export const typedArrayIncludes = function (
-  this: any,
-  searchElement: any,
-  fromIndex?: number,
-) {
-  let n = fromIndex !== undefined ? +fromIndex : 0; // +x, not Number(x)
-  if (n !== n) n = 0;
-  n = n >= 0 ? Math.floor(n) : Math.ceil(n);
-  for (
-    let i = Math.max(n >= 0 ? n : this.length + n, 0);
-    i < this.length;
-    i++
-  ) {
-    const el = this[i];
-    if (
-      el === searchElement ||
-      (el !== el && searchElement !== searchElement)
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
-export const typedArrayAt = function (this: any, index: number) {
-  // ToIntegerOrInfinity, not `| 0`: ToInt32 wrapped 2^32 back round to 0, so
-  // at(4294967296) answered element 0 instead of undefined.
-  const n = +index;
-  let i = n !== n ? 0 : n < 0 ? Math.ceil(n) : Math.floor(n);
-  if (i < 0) {
-    i += this.length;
-  }
-  if (i < 0 || i >= this.length) {
+/*
+ * Shared spec machinery for this island (WET: no imports across islands).
+ * Native probes are captured at load, before any user code can patch them.
+ */
+const objectToString = Object.prototype.toString;
+const hasOwn = Object.prototype.hasOwnProperty;
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+const getterOf = (owner: any, key: any): any => {
+  try {
+    const desc = owner && Object.getOwnPropertyDescriptor(owner, key);
+    return desc && typeof desc.get === 'function' ? desc.get : undefined;
+  } catch (e) {
     return undefined;
   }
-  return this[i];
+};
+const TA_NAMES = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array', 'Float16Array'];
+const globalObject: any = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : {});
+// the intrinsic constructors by [[TypedArrayName]]
+const intrinsicByName: any = {};
+for (let i = 0; i < TA_NAMES.length; i++) {
+  if (typeof globalObject[TA_NAMES[i]] === 'function') intrinsicByName[TA_NAMES[i]] = globalObject[TA_NAMES[i]];
+}
+const typedArrayProto: any =
+  typeof Int8Array !== 'undefined' && Object.getPrototypeOf(Int8Array.prototype) !== Object.prototype
+    ? Object.getPrototypeOf(Int8Array.prototype)
+    : undefined;
+const tagKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
+const nativeTagGetter: any = typedArrayProto && tagKey ? getterOf(typedArrayProto, tagKey) : undefined;
+const nativeLengthGetter: any = typedArrayProto ? getterOf(typedArrayProto, 'length') : undefined;
+const nativeBufferGetter: any = typedArrayProto ? getterOf(typedArrayProto, 'buffer') : undefined;
+const detachedGetter: any = typeof ArrayBuffer !== 'undefined' ? getterOf(ArrayBuffer.prototype, 'detached') : undefined;
+
+// [[TypedArrayName]], or undefined for anything that is not a typed array.
+const typedArrayName = (O: any): string | undefined => {
+  if (!isObject(O)) return undefined;
+  if (nativeTagGetter) return nativeTagGetter.call(O);
+  // ES5 engines: typed arrays are host objects with a class string
+  const tag = objectToString.call(O);
+  const name = tag.slice(8, -1);
+  return intrinsicByName[name] !== undefined && tag === '[object ' + name + ']' ? name : undefined;
+};
+const lengthOf = (O: any): number => (nativeLengthGetter ? nativeLengthGetter.call(O) : O.length);
+const bufferOf = (O: any): any => (nativeBufferGetter ? nativeBufferGetter.call(O) : O.buffer);
+const isDetached = (O: any): boolean => !!(detachedGetter && detachedGetter.call(bufferOf(O)));
+
+// ValidateTypedArray: a typed array whose buffer is not detached; returns its length.
+const validate = (O: any, method: string): number => {
+  if (typedArrayName(O) === undefined) {
+    throw new TypeError('%TypedArray%.prototype.' + method + ': this is not a typed array');
+  }
+  if (isDetached(O)) {
+    throw new TypeError('%TypedArray%.prototype.' + method + ': the buffer is detached');
+  }
+  return lengthOf(O);
 };
 
-export const typedArrayEvery = function (
-  this: any,
-  predicate: Function,
-  thisArg?: any,
-) {
-  // inlined: assertCallable(predicate)
-  if (typeof predicate !== "function") throw new TypeError(predicate + " is not a function");
-  for (let i = 0; i < this.length; i++) {
-    if (!predicate.call(thisArg, this[i], i, this)) {
-      return false;
-    }
-  }
-  return true;
+const toIntegerOrInfinity = (value: any): number => {
+  const n = +value; // +x, not Number(x)
+  return n !== n ? 0 : n === Infinity || n === -Infinity ? n : n < 0 ? Math.ceil(n) : Math.floor(n);
+};
+const relativeIndex = (value: any, len: number): number => {
+  const rel = toIntegerOrInfinity(value);
+  return rel < 0 ? Math.max(len + rel, 0) : Math.min(rel, len);
+};
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+// IsConstructor, best ES5 approximation (see es.array.from for the native probe)
+const isConstructor = (C: any): boolean =>
+  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
+
+// TypedArrayCreateFromConstructor(C, [len]): construct, validate, check the length.
+const createFromConstructor = (C: any, length: number): any => {
+  const created = new C(length);
+  if (typedArrayName(created) === undefined) throw new TypeError('the constructor did not make a typed array');
+  if (isDetached(created)) throw new TypeError('the constructed typed array is detached');
+  if (lengthOf(created) < length) throw new TypeError('the constructed typed array is too short');
+  return created;
 };
 
-export const typedArraySome = function (
-  this: any,
-  predicate: Function,
-  thisArg?: any,
-) {
-  // inlined: assertCallable(predicate)
-  if (typeof predicate !== "function") throw new TypeError(predicate + " is not a function");
-  for (let i = 0; i < this.length; i++) {
-    if (predicate.call(thisArg, this[i], i, this)) {
-      return true;
-    }
-  }
-  return false;
-};
-
-export const typedArrayForEach = function (
-  this: any,
-  callback: Function,
-  thisArg?: any,
-) {
-  // inlined: assertCallable(callback)
-  if (typeof callback !== "function") throw new TypeError(callback + " is not a function");
-  for (let i = 0; i < this.length; i++) {
-    callback.call(thisArg, this[i], i, this);
-  }
-  return undefined;
-};
-
-export const typedArrayMap = function (
-  this: any,
-  callback: Function,
-  thisArg?: any,
-) {
-  // inlined: assertCallable(callback)
-  if (typeof callback !== "function") throw new TypeError(callback + " is not a function");
-  const out = new this.constructor(this.length);
-  for (let i = 0; i < this.length; i++) {
-    // assignment coerces per element type, matching spec store semantics
-    out[i] = callback.call(thisArg, this[i], i, this);
-  }
-  return out;
-};
-
-export const typedArrayFilter = function (
-  this: any,
-  predicate: Function,
-  thisArg?: any,
-) {
-  // inlined: assertCallable(predicate)
-  if (typeof predicate !== "function") throw new TypeError(predicate + " is not a function");
-  // One temp plain array — kept count is unknowable without running the
-  // predicate twice, which the spec forbids.
-  const kept = [];
-  for (let i = 0; i < this.length; i++) {
-    const el = this[i];
-    if (predicate.call(thisArg, el, i, this)) {
-      kept.push(el);
-    }
-  }
-  const out = new this.constructor(kept.length);
-  for (let i = 0; i < kept.length; i++) {
-    out[i] = kept[i];
-  }
-  return out;
-};
-
-export const typedArrayIndexOf = function (
-  this: any,
-  searchElement: any,
-  fromIndex?: any,
-) {
-  const len = this.length;
-  let n = 0;
-  if (fromIndex !== undefined) {
-    // inlined: toInt(fromIndex)
-    n = +fromIndex;
-    n = n !== n ? 0 : n >= 0 ? Math.floor(n) : Math.ceil(n);
-  }
-  if (n >= len) return -1;
-  for (let i = Math.max(n >= 0 ? n : len + n, 0); i < len; i++) {
-    // strict equality: NaN never matches, -0 === +0
-    if (this[i] === searchElement) {
-      return i;
-    }
-  }
-  return -1;
-};
-
-export const typedArrayLastIndexOf = function (
-  this: any,
-  searchElement: any,
-  fromIndex?: any,
-) {
-  const len = this.length;
-  let k = len - 1;
-  if (arguments.length > 1) {
-    // inlined: toInt(fromIndex)
-    k = +fromIndex;
-    k = k !== k ? 0 : k >= 0 ? Math.floor(k) : Math.ceil(k);
-  }
-  k = k >= 0 ? Math.min(k, len - 1) : len + k;
-  for (let i = k; i >= 0; i--) {
-    if (this[i] === searchElement) {
-      return i;
-    }
-  }
-  return -1;
-};
-
-export const typedArrayJoin = function (this: any, separator?: any) {
-  const sep = separator === undefined ? "," : String(separator);
-  // inlined: joinInternal(this, sep, false)
-  const ta = this;
-  let out = "";
-  for (let i = 0; i < ta.length; i++) {
-    if (i > 0) out += sep;
-    out += ta[i];
-  }
-  return out;
-};
-
-export const typedArrayToString = function (this: any) {
-  // inlined: joinInternal(this, ",", false)
-  const ta = this;
-  let out = "";
-  for (let i = 0; i < ta.length; i++) {
-    if (i > 0) out += ",";
-    out += ta[i];
-  }
-  return out;
-};
-
-export const typedArrayToLocaleString = function (this: any) {
-  // inlined: joinInternal(this, ",", true)
-  const ta = this;
-  let out = "";
-  for (let i = 0; i < ta.length; i++) {
-    if (i > 0) out += ",";
-    out += ta[i].toLocaleString();
-  }
-  return out;
-};
-
-export const typedArrayReduce = function (
-  this: any,
-  callback: Function,
-  initialValue?: any,
-) {
-  // inlined: assertCallable(callback)
-  if (typeof callback !== "function") throw new TypeError(callback + " is not a function");
-  const len = this.length;
-  let acc;
-  let i = 0;
-  if (arguments.length > 1) {
-    acc = initialValue;
+// TypedArraySpeciesCreate(exemplar, [len]) via SpeciesConstructor.
+const speciesCreate = (O: any, length: number): any => {
+  const defaultCtor = intrinsicByName[typedArrayName(O) as string];
+  let C: any = O.constructor;
+  if (C === undefined) {
+    C = defaultCtor;
   } else {
-    if (len === 0) {
-      throw new TypeError("Reduce of empty array with no initial value");
-    }
-    acc = this[0];
-    i = 1;
+    if (!isObject(C)) throw new TypeError('the typed array constructor is not an object');
+    const S = typeof Symbol !== 'undefined' && (Symbol as any).species ? C[(Symbol as any).species] : undefined;
+    if (S === undefined || S === null) C = defaultCtor;
+    else if (isConstructor(S)) C = S;
+    else throw new TypeError('the typed array @@species is not a constructor');
   }
-  for (; i < len; i++) {
-    acc = callback(acc, this[i], i, this);
-  }
-  return acc;
+  return createFromConstructor(C, length);
 };
 
-export const typedArrayReduceRight = function (
-  this: any,
-  callback: Function,
-  initialValue?: any,
-) {
-  // inlined: assertCallable(callback)
-  if (typeof callback !== "function") throw new TypeError(callback + " is not a function");
-  const len = this.length;
-  let acc;
-  let i = len - 1;
-  if (arguments.length > 1) {
-    acc = initialValue;
-  } else {
-    if (len === 0) {
-      throw new TypeError("Reduce of empty array with no initial value");
-    }
-    acc = this[len - 1];
-    i = len - 2;
-  }
-  for (; i >= 0; i--) {
-    acc = callback(acc, this[i], i, this);
-  }
-  return acc;
-};
+// TypedArrayCreateSameType: the intrinsic constructor, never @@species.
+const createSameType = (O: any, length: number): any => new intrinsicByName[typedArrayName(O) as string](length);
 
-export const typedArrayReverse = function (this: any) {
-  const len = this.length;
-  for (let i = 0, j = len - 1; i < j; i++, j--) {
-    const tmp = this[i];
-    this[i] = this[j];
-    this[j] = tmp;
-  }
-  return this;
-};
-
-export const typedArraySlice = function (this: any, start?: any, end?: any) {
-  const len = this.length;
-  // inlined: relativeIndex(start, len, 0)
-  let from = 0;
-  if (start !== undefined) {
-    from = +start;
-    from = from !== from ? 0 : from >= 0 ? Math.floor(from) : Math.ceil(from);
-    from = from < 0 ? Math.max(len + from, 0) : Math.min(from, len);
-  }
-  // inlined: relativeIndex(end, len, len)
-  let to = len;
-  if (end !== undefined) {
-    to = +end;
-    to = to !== to ? 0 : to >= 0 ? Math.floor(to) : Math.ceil(to);
-    to = to < 0 ? Math.max(len + to, 0) : Math.min(to, len);
-  }
-  const count = Math.max(to - from, 0);
-  const out = new this.constructor(count);
-  for (let i = 0; i < count; i++) {
-    out[i] = this[from + i];
-  }
-  return out;
-};
-
-// %TypedArray%.sort default comparator: numeric ascending, NaN sorts last,
-// -0 sorts before +0.
+// %TypedArray% default comparator: numeric ascending, -0 before +0, NaN last.
 const defaultSortCompare = (x: number, y: number): number => {
   if (x !== x) return y !== y ? 0 : 1;
   if (y !== y) return -1;
@@ -444,128 +234,341 @@ const defaultSortCompare = (x: number, y: number): number => {
   }
   return 0;
 };
-
-export const typedArraySort = function (this: any, compareFn?: any) {
-  if (compareFn !== undefined && typeof compareFn !== "function") {
-    throw new TypeError(
-      "The comparison function must be either a function or undefined",
-    );
+let activeCompareFn: any;
+const userCompare = (a: any, b: any): number => {
+  const v = +activeCompareFn(a, b);
+  return v === v ? v : 0;
+};
+// Stable merge sort over null-prototype lists (spec-internal: no setter may run).
+const sortList = (items: any, length: number, compare: (a: any, b: any) => number): any => {
+  if (length < 2) return items;
+  let source = items;
+  let target: any = Object.create(null);
+  for (let width = 1; width < length; width *= 2) {
+    for (let start = 0; start < length; start += width * 2) {
+      let left = start;
+      const middle = start + width < length ? start + width : length;
+      let right = middle;
+      const end = start + width * 2 < length ? start + width * 2 : length;
+      let out = start;
+      while (left < middle && right < end) {
+        if (compare(source[left], source[right]) <= 0) target[out++] = source[left++];
+        else target[out++] = source[right++];
+      }
+      while (left < middle) target[out++] = source[left++];
+      while (right < end) target[out++] = source[right++];
+    }
+    const swap = source;
+    source = target;
+    target = swap;
   }
-  const len = this.length;
-  // Sort a plain-array copy with the engine's Array sort, write back in place.
-  // One temp array; avoids hand-rolling a sort in ES5.
-  const tmp = [];
-  for (let i = 0; i < len; i++) {
-    tmp.push(this[i]);
+  return source;
+};
+const sortedList = (O: any, len: number, comparefn: any): any => {
+  let items: any = Object.create(null);
+  for (let i = 0; i < len; i++) items[i] = O[i];
+  if (comparefn === undefined) return sortList(items, len, defaultSortCompare);
+  const saved = activeCompareFn;
+  activeCompareFn = comparefn;
+  try {
+    items = sortList(items, len, userCompare);
+  } finally {
+    activeCompareFn = saved;
   }
-  tmp.sort(compareFn !== undefined ? compareFn : defaultSortCompare);
-  for (let i = 0; i < len; i++) {
-    this[i] = tmp[i];
-  }
-  return this;
+  return items;
 };
 
-export const typedArrayCopyWithin = function (
-  this: any,
-  target: any,
-  start: any,
-  end?: any,
-) {
-  const len = this.length;
-  // inlined: relativeIndex(target, len, 0)
-  let to = 0;
-  if (target !== undefined) {
-    to = +target;
-    to = to !== to ? 0 : to >= 0 ? Math.floor(to) : Math.ceil(to);
-    to = to < 0 ? Math.max(len + to, 0) : Math.min(to, len);
+// Declared (callbackfn) for the spec length of 1 throughout; thisArg from arguments.
+export const typedArrayFind = function find(this: any, callbackfn: any) {
+  const len = validate(this, 'find');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = 0; k < len; k++) {
+    const kValue = this[k];
+    if (callbackfn.call(thisArg, kValue, k, this)) return kValue;
   }
-  // inlined: relativeIndex(start, len, 0)
-  let from = 0;
-  if (start !== undefined) {
-    from = +start;
-    from = from !== from ? 0 : from >= 0 ? Math.floor(from) : Math.ceil(from);
-    from = from < 0 ? Math.max(len + from, 0) : Math.min(from, len);
+  return undefined;
+};
+
+export const typedArrayFindIndex = function findIndex(this: any, callbackfn: any) {
+  const len = validate(this, 'findIndex');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = 0; k < len; k++) {
+    if (callbackfn.call(thisArg, this[k], k, this)) return k;
   }
-  // inlined: relativeIndex(end, len, len)
-  let final = len;
-  if (end !== undefined) {
-    final = +end;
-    final = final !== final ? 0 : final >= 0 ? Math.floor(final) : Math.ceil(final);
-    final = final < 0 ? Math.max(len + final, 0) : Math.min(final, len);
+  return -1;
+};
+
+// Declared (searchElement) for the spec length of 1; fromIndex from arguments.
+export const typedArrayIncludes = function includes(this: any, searchElement: any) {
+  const len = validate(this, 'includes');
+  // an empty array answers false before fromIndex is converted
+  if (len === 0) return false;
+  let n = toIntegerOrInfinity(arguments.length > 1 ? arguments[1] : undefined);
+  if (n === Infinity) return false;
+  if (n === -Infinity) n = 0;
+  for (let k = n >= 0 ? n : Math.max(len + n, 0); k < len; k++) {
+    const el = this[k];
+    if (el === searchElement || (el !== el && searchElement !== searchElement)) return true;
   }
-  let count = Math.min(final - from, len - to);
-  if (from < to && to < from + count) {
-    // overlapping forward copy would clobber the source — copy backwards
-    from += count - 1;
-    to += count - 1;
-    while (count > 0) {
-      this[to] = this[from];
-      to--;
-      from--;
-      count--;
-    }
+  return false;
+};
+
+export const typedArrayAt = function at(this: any, index: any) {
+  const len = validate(this, 'at');
+  const rel = toIntegerOrInfinity(index);
+  const k = rel >= 0 ? rel : len + rel;
+  if (k < 0 || k >= len) return undefined;
+  return this[k];
+};
+
+export const typedArrayEvery = function every(this: any, callbackfn: any) {
+  const len = validate(this, 'every');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = 0; k < len; k++) {
+    if (!callbackfn.call(thisArg, this[k], k, this)) return false;
+  }
+  return true;
+};
+
+export const typedArraySome = function some(this: any, callbackfn: any) {
+  const len = validate(this, 'some');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = 0; k < len; k++) {
+    if (callbackfn.call(thisArg, this[k], k, this)) return true;
+  }
+  return false;
+};
+
+export const typedArrayForEach = function forEach(this: any, callbackfn: any) {
+  const len = validate(this, 'forEach');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = 0; k < len; k++) callbackfn.call(thisArg, this[k], k, this);
+  return undefined;
+};
+
+export const typedArrayMap = function map(this: any, callbackfn: any) {
+  const len = validate(this, 'map');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  const A = speciesCreate(this, len);
+  for (let k = 0; k < len; k++) {
+    // assignment converts per element type, matching the spec's Set
+    A[k] = callbackfn.call(thisArg, this[k], k, this);
+  }
+  return A;
+};
+
+export const typedArrayFilter = function filter(this: any, callbackfn: any) {
+  const len = validate(this, 'filter');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  // internal list: the kept count is unknowable without running the predicate twice
+  const kept: any = Object.create(null);
+  let captured = 0;
+  for (let k = 0; k < len; k++) {
+    const kValue = this[k];
+    if (callbackfn.call(thisArg, kValue, k, this)) kept[captured++] = kValue;
+  }
+  const A = speciesCreate(this, captured);
+  for (let n = 0; n < captured; n++) A[n] = kept[n];
+  return A;
+};
+
+// Declared (searchElement) for the spec length of 1; fromIndex from arguments.
+export const typedArrayIndexOf = function indexOf(this: any, searchElement: any) {
+  const len = validate(this, 'indexOf');
+  if (len === 0) return -1;
+  let n = toIntegerOrInfinity(arguments.length > 1 ? arguments[1] : undefined);
+  if (n === Infinity) return -1;
+  if (n === -Infinity) n = 0;
+  for (let k = n >= 0 ? n : Math.max(len + n, 0); k < len; k++) {
+    // strict equality: NaN never matches, -0 === +0; + 0 so the result is never -0
+    if (k in this && this[k] === searchElement) return k + 0;
+  }
+  return -1;
+};
+
+export const typedArrayLastIndexOf = function lastIndexOf(this: any, searchElement: any) {
+  const len = validate(this, 'lastIndexOf');
+  if (len === 0) return -1;
+  const n = arguments.length > 1 ? toIntegerOrInfinity(arguments[1]) : len - 1;
+  if (n === -Infinity) return -1;
+  for (let k = n >= 0 ? Math.min(n, len - 1) : len + n; k >= 0; k--) {
+    if (k in this && this[k] === searchElement) return k + 0;
+  }
+  return -1;
+};
+
+export const typedArrayJoin = function join(this: any, separator?: any) {
+  const len = validate(this, 'join');
+  const sep = separator === undefined ? ',' : toStr(separator);
+  let out = '';
+  for (let k = 0; k < len; k++) {
+    if (k > 0) out += sep;
+    const element = this[k];
+    if (element !== undefined) out += toStr(element);
+  }
+  return out;
+};
+
+export const typedArrayToString = function toString(this: any) {
+  return typedArrayJoin.call(this);
+};
+
+export const typedArrayToLocaleString = function toLocaleString(this: any) {
+  const len = validate(this, 'toLocaleString');
+  let out = '';
+  for (let k = 0; k < len; k++) {
+    if (k > 0) out += ',';
+    const element = this[k];
+    if (element !== undefined && element !== null) out += toStr(element.toLocaleString());
+  }
+  return out;
+};
+
+export const typedArrayReduce = function reduce(this: any, callbackfn: any) {
+  const len = validate(this, 'reduce');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  let k = 0;
+  let accumulator: any;
+  if (arguments.length > 1) {
+    accumulator = arguments[1];
   } else {
-    while (count > 0) {
-      this[to] = this[from];
-      to++;
-      from++;
-      count--;
+    if (len === 0) throw new TypeError('Reduce of empty array with no initial value');
+    accumulator = this[0];
+    k = 1;
+  }
+  for (; k < len; k++) accumulator = callbackfn(accumulator, this[k], k, this);
+  return accumulator;
+};
+
+export const typedArrayReduceRight = function reduceRight(this: any, callbackfn: any) {
+  const len = validate(this, 'reduceRight');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  let k = len - 1;
+  let accumulator: any;
+  if (arguments.length > 1) {
+    accumulator = arguments[1];
+  } else {
+    if (len === 0) throw new TypeError('Reduce of empty array with no initial value');
+    accumulator = this[k];
+    k--;
+  }
+  for (; k >= 0; k--) accumulator = callbackfn(accumulator, this[k], k, this);
+  return accumulator;
+};
+
+export const typedArrayReverse = function reverse(this: any) {
+  const len = validate(this, 'reverse');
+  for (let lower = 0, upper = len - 1; lower < upper; lower++, upper--) {
+    const tmp = this[lower];
+    this[lower] = this[upper];
+    this[upper] = tmp;
+  }
+  return this;
+};
+
+export const typedArraySlice = function slice(this: any, start?: any, end?: any) {
+  const len = validate(this, 'slice');
+  const from = relativeIndex(start, len);
+  const to = end === undefined ? len : relativeIndex(end, len);
+  const count = Math.max(to - from, 0);
+  const A = speciesCreate(this, count);
+  if (count > 0) {
+    if (isDetached(this)) throw new TypeError('%TypedArray%.prototype.slice: the buffer was detached');
+    const finalIndex = Math.min(to, lengthOf(this));
+    for (let k = from, n = 0; k < finalIndex; k++, n++) A[n] = this[k];
+  }
+  return A;
+};
+
+export const typedArraySort = function sort(this: any, comparefn?: any) {
+  if (comparefn !== undefined && typeof comparefn !== 'function') {
+    throw new TypeError('The comparison function must be either a function or undefined');
+  }
+  const len = validate(this, 'sort');
+  const items = sortedList(this, len, comparefn);
+  for (let k = 0; k < len; k++) this[k] = items[k];
+  return this;
+};
+
+// Declared (target, start) for the spec length of 2; end from arguments.
+export const typedArrayCopyWithin = function copyWithin(this: any, target: any, start: any) {
+  const len = validate(this, 'copyWithin');
+  let to = relativeIndex(target, len);
+  let from = relativeIndex(start, len);
+  const end = arguments.length > 2 ? arguments[2] : undefined;
+  const final = end === undefined ? len : relativeIndex(end, len);
+  let count = Math.min(final - from, len - to);
+  if (count > 0) {
+    if (isDetached(this)) throw new TypeError('%TypedArray%.prototype.copyWithin: the buffer was detached');
+    count = Math.min(count, lengthOf(this) - from, lengthOf(this) - to);
+    if (from < to && to < from + count) {
+      // overlapping forward copy would clobber the source -- copy backwards
+      for (let i = count - 1; i >= 0; i--) this[to + i] = this[from + i];
+    } else {
+      for (let i = 0; i < count; i++) this[to + i] = this[from + i];
     }
   }
   return this;
 };
 
-export const typedArrayFill = function (
-  this: any,
-  value: any,
-  start?: any,
-  end?: any,
-) {
-  const len = this.length;
-  // inlined: relativeIndex(start, len, 0)
-  let from = 0;
-  if (start !== undefined) {
-    from = +start;
-    from = from !== from ? 0 : from >= 0 ? Math.floor(from) : Math.ceil(from);
-    from = from < 0 ? Math.max(len + from, 0) : Math.min(from, len);
-  }
-  // inlined: relativeIndex(end, len, len)
-  let to = len;
-  if (end !== undefined) {
-    to = +end;
-    to = to !== to ? 0 : to >= 0 ? Math.floor(to) : Math.ceil(to);
-    to = to < 0 ? Math.max(len + to, 0) : Math.min(to, len);
-  }
-  for (let i = from; i < to; i++) {
-    // assignment coerces per element type
-    this[i] = value;
-  }
+// Declared (value) for the spec length of 1; start and end from arguments.
+export const typedArrayFill = function fill(this: any, value: any) {
+  const len = validate(this, 'fill');
+  // ToNumber(value) once, before the range arguments
+  const numericValue = +value;
+  const start = arguments.length > 1 ? arguments[1] : undefined;
+  const end = arguments.length > 2 ? arguments[2] : undefined;
+  const k = relativeIndex(start, len);
+  const final = end === undefined ? len : relativeIndex(end, len);
+  if (isDetached(this)) throw new TypeError('%TypedArray%.prototype.fill: the buffer was detached');
+  const stop = Math.min(final, lengthOf(this));
+  for (let i = k; i < stop; i++) this[i] = numericValue;
   return this;
 };
 
+/*
+ * keys/values/entries: CreateArrayIterator(O, kind), i.e. %ArrayIteratorPrototype%.
+ * The Array.prototype ones produce exactly that (native, or spackle's es.array
+ * iterator), and they read the length each step as the spec's does.
+ */
+const arrayIteratorMethod = (name: string): any => {
+  const fn = (Array.prototype as any)[name];
+  return typeof fn === 'function' ? fn : undefined;
+};
 const returnSelfIterator = function (this: any) {
   return this;
 };
-
-// One prototype for every typed-array iterator, so _iterator-impl's splice has
-// something to hang the helpers off (never Object.prototype).
+// Fallback for engines with no Array iterators at all: one shared prototype.
 const TypedArrayIteratorPrototype: any = {};
-
-TypedArrayIteratorPrototype.next = function (this: any): any {
-  const ta = this._ta;
-  if (ta === null || this._index >= ta.length) {
-    // Release at exhaustion so a spent iterator does not pin the buffer.
-    this._ta = null;
-    return { value: undefined, done: true };
-  }
-  const index = this._index++;
-  const kind = this._kind;
-  if (kind === 0) return { value: index, done: false };
-  if (kind === 1) return { value: ta[index], done: false };
-  return { value: [index, ta[index]], done: false };
-};
-
-if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
+Object.defineProperty(TypedArrayIteratorPrototype, 'next', {
+  value: function next(this: any): any {
+    if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_kind')) {
+      throw new TypeError('next method called on an object that is not an Array Iterator');
+    }
+    const ta = this._ta;
+    if (ta === null || this._index >= lengthOf(ta)) {
+      // Release at exhaustion so a spent iterator does not pin the buffer.
+      this._ta = null;
+      return { value: undefined, done: true };
+    }
+    const index = this._index++;
+    const kind = this._kind;
+    if (kind === 0) return { value: index, done: false };
+    if (kind === 1) return { value: ta[index], done: false };
+    return { value: [index, ta[index]], done: false };
+  },
+  writable: true,
+  enumerable: false,
+  configurable: true,
+});
+if (typeof Symbol !== 'undefined' && (Symbol as any).iterator) {
   Object.defineProperty(TypedArrayIteratorPrototype, (Symbol as any).iterator, {
     value: returnSelfIterator,
     writable: true,
@@ -573,32 +576,35 @@ if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
     configurable: true,
   });
 }
-
-export const typedArrayKeys = function (this: any) {
-  // inlined: createTypedArrayIterator(this, 0)
+const ITER_SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: false };
+const makeIterator = (O: any, kind: number): any => {
   const iterator: any = Object.create(TypedArrayIteratorPrototype);
-  iterator._ta = this;
-  iterator._index = 0;
-  iterator._kind = 0;
+  ITER_SLOT.value = O;
+  Object.defineProperty(iterator, '_ta', ITER_SLOT);
+  ITER_SLOT.value = 0;
+  Object.defineProperty(iterator, '_index', ITER_SLOT);
+  ITER_SLOT.value = kind;
+  Object.defineProperty(iterator, '_kind', ITER_SLOT);
+  ITER_SLOT.value = undefined;
   return iterator;
 };
 
-export const typedArrayValues = function (this: any) {
-  // inlined: createTypedArrayIterator(this, 1)
-  const iterator: any = Object.create(TypedArrayIteratorPrototype);
-  iterator._ta = this;
-  iterator._index = 0;
-  iterator._kind = 1;
-  return iterator;
+export const typedArrayKeys = function keys(this: any) {
+  validate(this, 'keys');
+  const fn = arrayIteratorMethod('keys');
+  return fn ? fn.call(this) : makeIterator(this, 0);
 };
 
-export const typedArrayEntries = function (this: any) {
-  // inlined: createTypedArrayIterator(this, 2)
-  const iterator: any = Object.create(TypedArrayIteratorPrototype);
-  iterator._ta = this;
-  iterator._index = 0;
-  iterator._kind = 2;
-  return iterator;
+export const typedArrayValues = function values(this: any) {
+  validate(this, 'values');
+  const fn = arrayIteratorMethod('values');
+  return fn ? fn.call(this) : makeIterator(this, 1);
+};
+
+export const typedArrayEntries = function entries(this: any) {
+  validate(this, 'entries');
+  const fn = arrayIteratorMethod('entries');
+  return fn ? fn.call(this) : makeIterator(this, 2);
 };
 
 const installTypedArrayPolyfill = (): void => {
@@ -639,8 +645,12 @@ const installTypedArrayPolyfill = (): void => {
       ["values", typedArrayValues],
       ["entries", typedArrayEntries],
     ];
-    for (let i = 0; i < typedArrayTypes.length; i++) {
-      const TypedArray = typedArrayTypes[i];
+    // Where %TypedArray% exists the members belong on it (and every concrete
+    // type, Float16Array included, inherits them); only engines without one get
+    // a copy per concrete prototype.
+    const typedArrayTypesTargets: any[] = typedArrayProto ? [Object.getPrototypeOf(Int8Array)] : typedArrayTypes;
+    for (let i = 0; i < typedArrayTypesTargets.length; i++) {
+      const TypedArray = typedArrayTypesTargets[i];
       if (!TypedArray) continue;
       const proto = TypedArray.prototype as any;
       for (let m = 0; m < typedArrayMethods.length; m++) {
@@ -669,20 +679,13 @@ const installTypedArrayPolyfill = (): void => {
       }
       // compare identity: these inherit from Object.prototype pre-ES2015
       if (proto.toString === Object.prototype.toString) {
+        // %TypedArray%.prototype.toString is the same function object as
+        // Array.prototype.toString -- a native, so it is neither renamed nor marked
         Object.defineProperty(proto, "toString", {
-          value: typedArrayToString,
+          value: Array.prototype.toString,
           writable: true,
           enumerable: false,
           configurable: true,
-        });
-        try {
-          Object.defineProperty(proto.toString, "name", {
-            value: "toString",
-            configurable: true,
-          });
-        } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-        Object.defineProperty(proto.toString as any, "__polyfilled", {
-          value: true,
         });
       }
       if (proto.toLocaleString === Object.prototype.toLocaleString) {
@@ -706,9 +709,9 @@ const installTypedArrayPolyfill = (): void => {
       // (native, or installed earlier in this run).
       if (
         typeof Symbol !== "undefined" &&
-        (Symbol as any).iterator &&
-        !proto[(Symbol as any).iterator]
+        (Symbol as any).iterator
       ) {
+        // @@iterator is the very same function as values
         Object.defineProperty(proto, (Symbol as any).iterator, {
           value: proto.values,
           writable: true,
@@ -764,142 +767,136 @@ export const isModernSupported = (): boolean => {
   }
 };
 
-export const typedArrayFindLast = function (
-  this: any,
-  predicate: any,
-  thisArg?: any,
-) {
-  if (typeof predicate !== "function") {
-    throw new TypeError("predicate is not a function");
-  }
-  for (let i = this.length - 1; i >= 0; i--) {
-    if (predicate.call(thisArg, this[i], i, this)) {
-      return this[i];
-    }
+export const typedArrayFindLast = function findLast(this: any, callbackfn: any) {
+  const len = validate(this, 'findLast');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = len - 1; k >= 0; k--) {
+    const kValue = this[k];
+    if (callbackfn.call(thisArg, kValue, k, this)) return kValue;
   }
   return undefined;
 };
 
-export const typedArrayFindLastIndex = function (
-  this: any,
-  predicate: any,
-  thisArg?: any,
-) {
-  if (typeof predicate !== "function") {
-    throw new TypeError("predicate is not a function");
-  }
-  for (let i = this.length - 1; i >= 0; i--) {
-    if (predicate.call(thisArg, this[i], i, this)) {
-      return i;
-    }
+export const typedArrayFindLastIndex = function findLastIndex(this: any, callbackfn: any) {
+  const len = validate(this, 'findLastIndex');
+  if (typeof callbackfn !== 'function') throw new TypeError('callback is not a function');
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  for (let k = len - 1; k >= 0; k--) {
+    if (callbackfn.call(thisArg, this[k], k, this)) return k;
   }
   return -1;
 };
 
-export const typedArrayToReversed = function (this: any) {
-  const len = this.length;
-  const out = new this.constructor(len);
-  for (let i = 0; i < len; i++) {
-    out[i] = this[len - i - 1];
-  }
-  return out;
+export const typedArrayToReversed = function toReversed(this: any) {
+  const len = validate(this, 'toReversed');
+  const A = createSameType(this, len);
+  for (let k = 0; k < len; k++) A[k] = this[len - k - 1];
+  return A;
 };
 
-export const typedArrayToSorted = function (this: any, compareFn?: any) {
-  if (compareFn !== undefined && typeof compareFn !== "function") {
-    throw new TypeError(
-      "The comparison function must be either a function or undefined",
-    );
+export const typedArrayToSorted = function toSorted(this: any, comparefn?: any) {
+  if (comparefn !== undefined && typeof comparefn !== 'function') {
+    throw new TypeError('The comparison function must be either a function or undefined');
   }
-  const len = this.length;
-  const out = new this.constructor(len);
-  for (let i = 0; i < len; i++) {
-    out[i] = this[i];
-  }
-  // reuse the in-place sort, which already carries the spec's default
-  // numeric-ascending comparator and NaN handling
-  return typedArraySort.call(out, compareFn);
+  const len = validate(this, 'toSorted');
+  const A = createSameType(this, len);
+  const items = sortedList(this, len, comparefn);
+  for (let k = 0; k < len; k++) A[k] = items[k];
+  return A;
 };
 
 export const typedArrayWith = function (this: any, index: any, value: any) {
-  const len = this.length;
-  // inlined: toInt(index)
-  let relative = +index;
-  relative = relative !== relative ? 0 : relative >= 0 ? Math.floor(relative) : Math.ceil(relative);
-  const actual = relative < 0 ? len + relative : relative;
-  if (actual < 0 || actual >= len) {
-    throw new RangeError("Invalid index");
+  const len = validate(this, 'with');
+  const rel = toIntegerOrInfinity(index);
+  const actual = rel >= 0 ? rel : len + rel;
+  // the value is converted before the index is range-checked
+  const numericValue = +value;
+  if (actual < 0 || actual >= lengthOf(this) || isDetached(this)) {
+    throw new RangeError('Invalid typed array index');
   }
-  const out = new this.constructor(len);
-  for (let i = 0; i < len; i++) {
-    out[i] = i === actual ? value : this[i];
-  }
-  return out;
+  const A = createSameType(this, len);
+  for (let k = 0; k < len; k++) A[k] = k === actual ? numericValue : this[k];
+  return A;
 };
 
-export const typedArraySet = function (this: any, source: any, offset?: any) {
-  let targetOffset = 0;
-  if (offset !== undefined) {
-    // inlined: toInt(offset)
-    targetOffset = +offset;
-    targetOffset = targetOffset !== targetOffset ? 0 : targetOffset >= 0 ? Math.floor(targetOffset) : Math.ceil(targetOffset);
+// Declared (source) for the spec length of 1; offset from arguments.
+export const typedArraySet = function (this: any, source: any) {
+  if (typedArrayName(this) === undefined) {
+    throw new TypeError('%TypedArray%.prototype.set: this is not a typed array');
   }
-  if (targetOffset < 0) {
-    throw new RangeError("offset is out of bounds");
+  const targetOffset = toIntegerOrInfinity(arguments.length > 1 ? arguments[1] : undefined);
+  if (targetOffset < 0) throw new RangeError('offset is out of bounds');
+  if (isDetached(this)) throw new TypeError('%TypedArray%.prototype.set: the buffer is detached');
+  const targetLength = lengthOf(this);
+  if (typedArrayName(source) !== undefined) {
+    // SetTypedArrayFromTypedArray: read every value first, so a source sharing
+    // this buffer is copied as if through a temporary
+    if (isDetached(source)) throw new TypeError('%TypedArray%.prototype.set: the source buffer is detached');
+    const srcLength = lengthOf(source);
+    if (targetOffset === Infinity || srcLength + targetOffset > targetLength) throw new RangeError('offset is out of bounds');
+    const values: any = Object.create(null);
+    for (let k = 0; k < srcLength; k++) values[k] = source[k];
+    for (let k = 0; k < srcLength; k++) this[targetOffset + k] = values[k];
+    return undefined;
   }
+  // SetTypedArrayFromArrayLike
   const src = Object(source);
-  const srcLength = src.length >>> 0;
-  if (srcLength + targetOffset > this.length) {
-    throw new RangeError("offset is out of bounds");
-  }
-  for (let i = 0; i < srcLength; i++) {
-    this[targetOffset + i] = src[i];
-  }
+  let srcLength = +src.length;
+  srcLength = srcLength !== srcLength || srcLength <= 0 ? 0 : srcLength > 9007199254740991 ? 9007199254740991 : Math.floor(srcLength);
+  if (targetOffset === Infinity || srcLength + targetOffset > targetLength) throw new RangeError('offset is out of bounds');
+  for (let k = 0; k < srcLength; k++) this[targetOffset + k] = src[k];
+  return undefined;
 };
 
-// Statics. `this` is the concrete constructor being called on.
-export const typedArrayOf = function (this: any) {
+// Statics. `this` is the constructor being called on.
+export const typedArrayOf = function of(this: any) {
+  const C = this;
+  if (!isConstructor(C)) throw new TypeError('%TypedArray%.of: this is not a constructor');
   const len = arguments.length;
-  const out = new this(len);
-  for (let i = 0; i < len; i++) {
-    out[i] = arguments[i];
-  }
-  return out;
+  const newObj = createFromConstructor(C, len);
+  for (let k = 0; k < len; k++) newObj[k] = arguments[k];
+  return newObj;
 };
 
-export const typedArrayFrom = function (
-  this: any,
-  source: any,
-  mapFn?: any,
-  thisArg?: any,
-) {
-  if (mapFn !== undefined && typeof mapFn !== "function") {
-    throw new TypeError("mapfn is not a function");
-  }
-  const src = Object(source);
-  const items: any[] = [];
-  const iteratorKey =
-    typeof Symbol !== "undefined" && (Symbol as any).iterator
-      ? (Symbol as any).iterator
-      : undefined;
-  if (iteratorKey && typeof src[iteratorKey] === "function") {
-    const iterator = src[iteratorKey]();
-    let step = iterator.next();
-    while (!step.done) {
-      items.push(step.value);
-      step = iterator.next();
+// Declared (source) for the spec length of 1; mapfn and thisArg from arguments.
+export const typedArrayFrom = function from(this: any, source: any) {
+  const C = this;
+  if (!isConstructor(C)) throw new TypeError('%TypedArray%.from: this is not a constructor');
+  const mapfn = arguments.length > 1 ? arguments[1] : undefined;
+  const thisArg = arguments.length > 2 ? arguments[2] : undefined;
+  if (mapfn !== undefined && typeof mapfn !== 'function') throw new TypeError('mapfn is not a function');
+  const iteratorKey = typeof Symbol !== 'undefined' && (Symbol as any).iterator ? (Symbol as any).iterator : undefined;
+  let usingIterator: any = iteratorKey && source !== null && source !== undefined ? source[iteratorKey] : undefined;
+  if (usingIterator === null) usingIterator = undefined;
+  if (usingIterator !== undefined) {
+    if (typeof usingIterator !== 'function') throw new TypeError('%TypedArray%.from: @@iterator is not a function');
+    // IteratorToList first: every value is read before the target exists
+    const iterator = usingIterator.call(source);
+    if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+    const next = iterator.next;
+    const values: any = Object.create(null);
+    let len = 0;
+    for (;;) {
+      const step = next.call(iterator);
+      if (!isObject(step)) throw new TypeError('Iterator result is not an object');
+      if (step.done) break;
+      values[len++] = step.value;
     }
-  } else {
-    const len = src.length >>> 0;
-    for (let i = 0; i < len; i++) {
-      items.push(src[i]);
-    }
+    const target = createFromConstructor(C, len);
+    for (let k = 0; k < len; k++) target[k] = mapfn !== undefined ? mapfn.call(thisArg, values[k], k) : values[k];
+    return target;
   }
-  const out = new this(items.length);
-  for (let i = 0; i < items.length; i++) {
-    out[i] = mapFn ? mapFn.call(thisArg, items[i], i) : items[i];
+  if (source === null || source === undefined) throw new TypeError('%TypedArray%.from: source is null or undefined');
+  const arrayLike = Object(source);
+  let len = +arrayLike.length;
+  len = len !== len || len <= 0 ? 0 : len > 9007199254740991 ? 9007199254740991 : Math.floor(len);
+  const target = createFromConstructor(C, len);
+  for (let k = 0; k < len; k++) {
+    const kValue = arrayLike[k];
+    target[k] = mapfn !== undefined ? mapfn.call(thisArg, kValue, k) : kValue;
   }
-  return out;
+  return target;
 };
 
 const installTypedArrayExtensionsOnNative = (): void => {
@@ -941,8 +938,12 @@ const installTypedArrayExtensionsOnNative = (): void => {
       }
     })();
 
-    for (let i = 0; i < modernTypes.length; i++) {
-      const TypedArray = modernTypes[i] as any;
+    // Where %TypedArray% exists the members belong on it (and every concrete
+    // type, Float16Array included, inherits them); only engines without one get
+    // a copy per concrete prototype.
+    const modernTypesTargets: any[] = typedArrayProto ? [Object.getPrototypeOf(Int8Array)] : modernTypes;
+    for (let i = 0; i < modernTypesTargets.length; i++) {
+      const TypedArray = modernTypesTargets[i] as any;
       if (!TypedArray) continue;
       const proto = TypedArray.prototype as any;
       for (let m = 0; m < modernMethods.length; m++) {
@@ -1004,7 +1005,38 @@ const installTypedArrayExtensionsOnNative = (): void => {
   }
 };
 
+/*
+ * One %ArrayIteratorPrototype%: when es.array.iterator had to replace the array
+ * iterators, typed arrays must iterate through the same prototype, so their
+ * keys/values/entries/@@iterator follow (they delegate to the Array ones).
+ */
+const unifyIterators = (): void => {
+  const arrayValues = (Array.prototype as any).values;
+  if (!arrayValues || arrayValues.__polyfilled !== true) return;
+  const targets: any[] = typedArrayProto
+    ? [typedArrayProto]
+    : TA_NAMES.map(function (name: string) { return intrinsicByName[name] ? intrinsicByName[name].prototype : null; });
+  const methods: [string, any][] = [['keys', typedArrayKeys], ['values', typedArrayValues], ['entries', typedArrayEntries]];
+  for (let t = 0; t < targets.length; t++) {
+    const proto = targets[t];
+    if (!proto || (proto.values && proto.values.__polyfilled === true)) continue;
+    for (let m = 0; m < methods.length; m++) {
+      try {
+        Object.defineProperty(methods[m][1], 'name', { value: methods[m][0], configurable: true });
+      } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+      Object.defineProperty(proto, methods[m][0], { value: methods[m][1], writable: true, enumerable: false, configurable: true });
+      try {
+        Object.defineProperty(methods[m][1], '__polyfilled', { value: true });
+      } catch (e) { /* already marked */ }
+    }
+    if (typeof Symbol !== 'undefined' && (Symbol as any).iterator) {
+      Object.defineProperty(proto, (Symbol as any).iterator, { value: typedArrayValues, writable: true, enumerable: false, configurable: true });
+    }
+  }
+};
+
 export const install = (): void => {
   installTypedArrayPolyfill();
   installTypedArrayExtensionsOnNative();
+  unifyIterators();
 };

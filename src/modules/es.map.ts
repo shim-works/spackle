@@ -151,13 +151,24 @@ const MapIterator = function (
   self: any,
   kind: 'keys' | 'values' | 'entries',
 ): void {
-  this._self = self;
-  this._index = 0;
-  this._kind = kind;
-  this._epoch = self._epoch;
+  // Slots stay non-enumerable, like the spec's: Object.keys(iterator) is [].
+  SLOT.value = self;
+  Object.defineProperty(this, '_self', SLOT);
+  SLOT.value = 0;
+  Object.defineProperty(this, '_index', SLOT);
+  SLOT.value = kind;
+  Object.defineProperty(this, '_kind', SLOT);
+  SLOT.value = self._epoch;
+  Object.defineProperty(this, '_epoch', SLOT);
+  SLOT.value = undefined; // never pin the last value
 } as any;
 
-MapIterator.prototype.next = function (this: any): any {
+const hasOwnSlot = Object.prototype.hasOwnProperty;
+
+MapIterator.prototype.next = function next(this: any): any {
+  if (this === null || typeof this !== 'object' || !hasOwnSlot.call(this, '_kind')) {
+    throw new TypeError('next method called on an object that is not a Map Iterator');
+  }
   const self = this._self;
   // already exhausted -- _self was released below, nothing left to read
   if (self === null) {
@@ -217,7 +228,22 @@ const own = (target: any, key: string, value: any): void => {
   }
 };
 
-export const Map = function (this: any, iterable?: any) {
+// Captured at load: the array fast path below is only taken while arrays still
+// iterate with this function, so a patched Array.prototype[@@iterator] is honoured.
+const arrayIterAtLoad: any = hasSymbol ? (Array.prototype as any)[(Symbol as any).iterator] : undefined;
+
+// IteratorClose after a per-item failure: a throw from return() itself must
+// not mask the original error.
+const closeIterator = (iterator: any): void => {
+  try {
+    const ret = iterator['return'];
+    if (ret !== undefined && ret !== null) ret.call(iterator);
+  } catch (e) {
+    /* the original error wins */
+  }
+};
+
+export const Map = function (this: any) {
   if (!(this instanceof Map)) {
     throw new TypeError("Constructor Map requires 'new'");
   }
@@ -231,42 +257,65 @@ export const Map = function (this: any, iterable?: any) {
   Object.defineProperty(this, '_vals', SLOT);
   SLOT.value = undefined; // never pin the last value
 
+  const iterable = arguments.length > 0 ? arguments[0] : undefined;
   if (iterable === null || iterable === undefined) {
     return;
   }
+  // Get(map, "set") happens for every iterable, even an empty one
+  const adder = this.set;
+  if (typeof adder !== 'function') {
+    throw new TypeError('Map constructor: this.set is not a function');
+  }
 
-  // Consume an array directly, otherwise any Symbol.iterator iterable.
-  if (Array.isArray(iterable)) {
+  // A genuine array with untouched iteration: walk it directly (an array
+  // iterator has no return(), so nothing to close). Engines without Symbol get
+  // this path for arrays too, since nothing else is iterable there.
+  if (Array.isArray(iterable) && (!hasSymbol || (iterable[(Symbol as any).iterator] === arrayIterAtLoad && (Array.prototype as any)[(Symbol as any).iterator] === arrayIterAtLoad))) {
     for (let i = 0; i < iterable.length; i++) {
-      // inlined: addEntry(this, iterable[i])
-      const entry = iterable[i];
-      if (entry === null || (typeof entry !== 'object' && typeof entry !== 'function')) {
+      const item = iterable[i];
+      if (item === null || (typeof item !== 'object' && typeof item !== 'function')) {
         throw new TypeError('Iterator value is not an entry object');
       }
-      this.set(entry[0], entry[1]);
+      adder.call(this, item[0], item[1]);
     }
     return;
   }
 
-  if (hasSymbol && typeof iterable[(Symbol as any).iterator] === 'function') {
-    const it = iterable[(Symbol as any).iterator]();
-    let step = it.next();
-    while (!step.done) {
-      // inlined: addEntry(this, step.value)
-      const entry = step.value;
-      if (entry === null || (typeof entry !== 'object' && typeof entry !== 'function')) {
+  const method = hasSymbol ? iterable[(Symbol as any).iterator] : undefined;
+  if (typeof method !== 'function') {
+    throw new TypeError('Map constructor argument is not iterable');
+  }
+  const iterator = method.call(iterable);
+  if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) {
+    throw new TypeError('Result of the Symbol.iterator method is not an object');
+  }
+  // GetIteratorDirect reads next once; errors from next/done/value never close
+  const next = iterator.next;
+  for (;;) {
+    const step = next.call(iterator);
+    if (step === null || (typeof step !== 'object' && typeof step !== 'function')) {
+      throw new TypeError('Iterator result is not an object');
+    }
+    if (step.done) {
+      return;
+    }
+    const item = step.value;
+    try {
+      if (item === null || (typeof item !== 'object' && typeof item !== 'function')) {
         throw new TypeError('Iterator value is not an entry object');
       }
-      this.set(entry[0], entry[1]);
-      step = it.next();
+      adder.call(this, item[0], item[1]);
+    } catch (error) {
+      closeIterator(iterator);
+      throw error;
     }
-    return;
   }
-
-  throw new TypeError('Map constructor argument is not iterable');
 } as any;
 
 Map.prototype.set = function (this: any, key: any, value: any): any {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.set called on incompatible receiver');
+  }
   // Normalise -0 to +0 so iteration never surfaces -0 (SameValueZero key).
   if (key === 0) {
     key = 0;
@@ -304,6 +353,9 @@ Map.prototype.set = function (this: any, key: any, value: any): any {
 };
 
 Map.prototype.get = function (this: any, key: any): any {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.get called on incompatible receiver');
+  }
   // inlined: indexOf(this, key) -- dictionary once big, else scan
   let i = -1;
   if (this._si !== 0 && (typeof key === 'string' || typeof key === 'number')) {
@@ -324,6 +376,9 @@ Map.prototype.get = function (this: any, key: any): any {
 };
 
 Map.prototype.has = function (this: any, key: any): boolean {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.has called on incompatible receiver');
+  }
   // inlined: indexOf(this, key) -- dictionary once big, else scan
   let i = -1;
   if (this._si !== 0 && (typeof key === 'string' || typeof key === 'number')) {
@@ -344,6 +399,9 @@ Map.prototype.has = function (this: any, key: any): boolean {
 };
 
 Map.prototype.delete = function (this: any, key: any): boolean {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.delete called on incompatible receiver');
+  }
   // inlined: indexOf(this, key) -- dictionary once big, else scan
   let i = -1;
   if (this._si !== 0 && (typeof key === 'string' || typeof key === 'number')) {
@@ -377,17 +435,21 @@ Map.prototype.delete = function (this: any, key: any): boolean {
 };
 
 Map.prototype.clear = function (this: any): void {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.clear called on incompatible receiver');
+  }
   // spec: every entry becomes ~empty~; paused iterators see only what is
   // added afterwards -- the epoch restart gives exactly that
   own(this, '_holes', this._keys.length);
   compact(this);
 };
 
-Map.prototype.forEach = function (
-  this: any,
-  callback: (value: any, key: any, map: any) => void,
-  thisArg?: any,
-): void {
+// Declared (callbackfn) for the spec length of 1; thisArg comes from arguments.
+Map.prototype.forEach = function (this: any, callback: any): void {
+  const thisArg = arguments.length > 1 ? arguments[1] : undefined;
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.forEach called on incompatible receiver');
+  }
   if (typeof callback !== 'function') {
     throw new TypeError('Map.prototype.forEach callback is not a function');
   }
@@ -419,14 +481,23 @@ Map.prototype.forEach = function (
 };
 
 Map.prototype.keys = function (this: any): any {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.keys called on incompatible receiver');
+  }
   return new MapIterator(this, 'keys');
 };
 
 Map.prototype.values = function (this: any): any {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.values called on incompatible receiver');
+  }
   return new MapIterator(this, 'values');
 };
 
 Map.prototype.entries = function (this: any): any {
+  if (this === null || typeof this !== 'object' || this._vals === undefined) {
+    throw new TypeError('Method Map.prototype.entries called on incompatible receiver');
+  }
   return new MapIterator(this, 'entries');
 };
 
@@ -452,6 +523,35 @@ if (hasSymbol) {
   if ((Symbol as any).toStringTag) {
     Object.defineProperty(Map.prototype, (Symbol as any).toStringTag, { value: 'Map', writable: false, enumerable: false, configurable: true });
   }
+}
+
+// Methods non-enumerable, writable and configurable like the natives', with
+// their spec names (assigned function expressions are anonymous).
+const mapMethods: any[] = [['set', 2], ['get', 1], ['has', 1], ['delete', 1], ['clear', 0], ['forEach', 1], ['keys', 0], ['values', 0], ['entries', 0]];
+for (let i = 0; i < mapMethods.length; i++) {
+  const name = mapMethods[i][0];
+  const fn = (Map.prototype as any)[name];
+  try {
+    Object.defineProperty(fn, 'name', { value: name, configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(Map.prototype, name, { value: fn, writable: true, enumerable: false, configurable: true });
+}
+try {
+  Object.defineProperty(MapIterator.prototype.next, 'name', { value: 'next', configurable: true });
+} catch (e) { /* Function#name non-configurable pre-ES6 */ }
+Object.defineProperty(MapIterator.prototype, 'next', { value: MapIterator.prototype.next, writable: true, enumerable: false, configurable: true });
+// Map[@@species]: a getter returning this
+if (typeof Symbol !== 'undefined' && (Symbol as any).species) {
+  const speciesGetter = function (this: any) {
+    return this;
+  };
+  try {
+    Object.defineProperty(speciesGetter, 'name', { value: 'get [Symbol.species]', configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Object.defineProperty(Map, (Symbol as any).species, { get: speciesGetter, enumerable: false, configurable: true });
+}
+if (hasSymbol && (Symbol as any).toStringTag) {
+  Object.defineProperty(MapIterator.prototype, (Symbol as any).toStringTag, { value: 'Map Iterator', writable: false, enumerable: false, configurable: true });
 }
 
 export const install = (): void => {

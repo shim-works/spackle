@@ -8,8 +8,27 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-map.groupby */
 
-export const mapGroupBy = (items: any, callbackfn: any): any => {
-  if (items == null) {
+// One descriptor for building each group's array (CreateArrayFromList), reused.
+const LIST: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
+
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+const addToGroup = (groups: any, key: any, value: any): void => {
+  // SameValueZero: -0 buckets with +0
+  const normalized = key === 0 ? 0 : key;
+  let elements = groups.get(normalized);
+  if (!elements) {
+    elements = [];
+    groups.set(normalized, elements);
+  }
+  LIST.value = value;
+  Object.defineProperty(elements, elements.length, LIST);
+  LIST.value = undefined;
+};
+
+export const mapGroupBy = function groupBy(items: any, callbackfn: any): any {
+  if (items === null || items === undefined) {
     throw new TypeError('Map.groupBy requires an iterable of items');
   }
   if (typeof callbackfn !== 'function') {
@@ -19,38 +38,42 @@ export const mapGroupBy = (items: any, callbackfn: any): any => {
   // live (native or the island — the mount gates Map first), so constructing off
   // it keeps `Map.groupBy(x) instanceof Map` true either way.
   const groups = new Map();
-  // iterator protocol when one is live (native Symbol or the island)
-  if (
-    typeof Symbol !== 'undefined' &&
-    (Symbol as any).iterator &&
-    typeof items[(Symbol as any).iterator] === 'function'
-  ) {
-    const it = items[(Symbol as any).iterator]();
-    let index = 0;
-    let step = it.next();
-    while (!step.done) {
-      // inlined: addTo(callbackfn(step.value, index++), step.value) -- SameValueZero: -0 buckets with +0
-      const key = callbackfn(step.value, index++);
-      const normalized = key === 0 ? 0 : key;
-      const existing = groups.get(normalized);
-      if (existing) existing.push(step.value);
-      else groups.set(normalized, [step.value]);
-      step = it.next();
+  const iteratorKey = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+  if (iteratorKey) {
+    // GetIterator(items, sync): not iterable is a TypeError
+    const method = items[iteratorKey];
+    if (typeof method !== 'function') throw new TypeError('Map.groupBy argument is not iterable');
+    const iterator = method.call(items);
+    if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+    const next = iterator.next;
+    let k = 0;
+    for (;;) {
+      const step = next.call(iterator);
+      if (!isObject(step)) throw new TypeError('Iterator result is not an object');
+      if (step.done) return groups;
+      const value = step.value;
+      let key: any;
+      try {
+        if (k >= 9007199254740991) throw new TypeError('Map.groupBy: too many elements');
+        key = callbackfn(value, k);
+      } catch (error) {
+        // the callback failed: close the source, then rethrow its error
+        try {
+          const ret = iterator['return'];
+          if (ret !== undefined && ret !== null) ret.call(iterator);
+        } catch (e) {
+          /* the original error wins */
+        }
+        throw error;
+      }
+      addToGroup(groups, key, value);
+      k++;
     }
-    return groups;
   }
-  // ES5 fallback: array-like
+  // Engines without Symbol: nothing is iterable, so read an array-like.
   if (typeof items.length === 'number') {
-    for (let i = 0; i < items.length; i++) {
-      // inlined: addTo(callbackfn(items[i], i), items[i]) -- SameValueZero: -0 buckets with +0
-      const key = callbackfn(items[i], i);
-      const normalized = key === 0 ? 0 : key;
-      const existing = groups.get(normalized);
-      if (existing) existing.push(items[i]);
-      else groups.set(normalized, [items[i]]);
-    }
+    for (let i = 0; i < items.length; i++) addToGroup(groups, callbackfn(items[i], i), items[i]);
     return groups;
   }
   throw new TypeError('Map.groupBy argument is not iterable');
 };
-

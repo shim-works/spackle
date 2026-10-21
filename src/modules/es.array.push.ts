@@ -22,7 +22,8 @@ export const isSupported = (): boolean => {
 };
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.push */
-export const arrayPush = function push(this: any): number {
+// Declared (item) only, for the spec length of 1; every argument comes from arguments.
+export const arrayPush = function push(this: any, _item?: any): number {
   // inlined: toObject(this)
   if (this === null || this === undefined) throw new TypeError('Cannot convert undefined or null to object');
   const O = Object(this);

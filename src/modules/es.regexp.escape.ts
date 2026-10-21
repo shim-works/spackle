@@ -37,6 +37,9 @@ export const regExpEscape = (str: any): string => {
       hex = true;
     } else if (SYNTAX_CHARS.indexOf(ch) !== -1) {
       out += '\\' + ch;
+    } else if (code >= 0x09 && code <= 0x0d) {
+      // ControlEscape: \t \n \v \f \r, not \x09..\x0d
+      out += '\\' + 'tnvfr'.charAt(code - 0x09);
     } else if (
       OTHER_PUNCTUATORS.indexOf(ch) !== -1 ||
       // inlined: isWhiteSpaceOrLineTerminator(code)

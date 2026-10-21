@@ -11,17 +11,32 @@ export const isSupported = (): boolean => {
   }
 };
 
-export const stringPadStart = function (
-  this: string,
-  targetLength: number,
-  padString?: string
-): string {
-  const source = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
-  const padWith = padString !== undefined ? String(padString) : ' ';
-  if (source.length >= targetLength || padWith.length === 0) {
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
+// Declared (maxLength) for the spec length of 1; fillString comes from arguments.
+export const stringPadStart = function padStart(this: any, maxLength: any): string {
+  // RequireObjectCoercible + ToString(this), then ToLength(maxLength), then
+  // ToString(fillString) -- the spec's conversion order
+  if (this === null || this === undefined) {
+    throw new TypeError('String.prototype.padStart called on null or undefined');
+  }
+  const source = toStr(this);
+  let intMaxLength = +maxLength; // +x, not Number(x)
+  intMaxLength = intMaxLength !== intMaxLength || intMaxLength <= 0 ? 0 : intMaxLength > 9007199254740991 ? 9007199254740991 : Math.floor(intMaxLength);
+  const stringLength = source.length;
+  if (intMaxLength <= stringLength) {
     return source;
   }
-  const charsNeeded = targetLength - source.length;
+  const fillString = arguments.length > 1 ? arguments[1] : undefined;
+  const padWith = fillString === undefined ? ' ' : toStr(fillString);
+  if (padWith.length === 0) {
+    return source;
+  }
+  const charsNeeded = intMaxLength - stringLength;
   let fill = padWith;
   // Double, don't append: log2(n) intermediate strings instead of n.
   while (fill.length < charsNeeded) {

@@ -7,7 +7,7 @@ import { promiseAllSettled } from '../src/modules/es.promise.all-settled.js';
  */
 describe('Promise.allSettled — test262 conformance', () => {
   it('resolves with all-fulfilled results in input order', async () => {
-    const out = await promiseAllSettled([
+    const out = await promiseAllSettled.call(Promise, [
       Promise.resolve(1),
       Promise.resolve(2),
       Promise.resolve(3),
@@ -20,7 +20,7 @@ describe('Promise.allSettled — test262 conformance', () => {
   });
 
   it('preserves order and status for a mixed fulfil/reject input', async () => {
-    const out = await promiseAllSettled([
+    const out = await promiseAllSettled.call(Promise, [
       Promise.resolve('a'),
       Promise.reject('b'),
       Promise.resolve('c'),
@@ -33,7 +33,7 @@ describe('Promise.allSettled — test262 conformance', () => {
   });
 
   it('never rejects, even when every input rejects', async () => {
-    const out = await promiseAllSettled([
+    const out = await promiseAllSettled.call(Promise, [
       Promise.reject('x'),
       Promise.reject('y'),
     ]);
@@ -44,7 +44,7 @@ describe('Promise.allSettled — test262 conformance', () => {
   });
 
   it('wraps non-promise values as fulfilled', async () => {
-    const out = await promiseAllSettled([1, 'two', true]);
+    const out = await promiseAllSettled.call(Promise, [1, 'two', true]);
     expect(out).toEqual([
       { status: 'fulfilled', value: 1 },
       { status: 'fulfilled', value: 'two' },
@@ -53,14 +53,14 @@ describe('Promise.allSettled — test262 conformance', () => {
   });
 
   it('resolves with an empty array for empty input', async () => {
-    const out = await promiseAllSettled([]);
+    const out = await promiseAllSettled.call(Promise, []);
     expect(out).toEqual([]);
   });
 
   it('matches native Promise.allSettled for a mixed input', async () => {
     const input = () => [Promise.resolve(1), Promise.reject(2)];
     const nativeOut = await Promise.allSettled(input());
-    const polyOut = await promiseAllSettled(input());
+    const polyOut = await promiseAllSettled.call(Promise, input());
     expect(polyOut).toEqual(nativeOut);
   });
 });

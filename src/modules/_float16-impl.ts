@@ -115,22 +115,28 @@ export const mathF16round = function (value: any): number {
 };
 
 /** Spec: https://tc39.es/proposal-float16array/#sec-dataview.prototype.getfloat16 */
-export const dataViewGetFloat16 = function (
-  this: any,
-  byteOffset: any,
-  littleEndian?: any
-): number {
-  return float16BitsToDouble(this.getUint16(byteOffset, !!littleEndian));
+// Declared (byteOffset) for the spec length of 1; littleEndian comes from arguments.
+export const dataViewGetFloat16 = function getFloat16(this: any, byteOffset: any): number {
+  return float16BitsToDouble(this.getUint16(byteOffset, !!(arguments.length > 1 && arguments[1])));
 };
 
+const objectToString = Object.prototype.toString;
+
 /** Spec: https://tc39.es/proposal-float16array/#sec-dataview.prototype.setfloat16 */
-export const dataViewSetFloat16 = function (
-  this: any,
-  byteOffset: any,
-  value: any,
-  littleEndian?: any
-): void {
-  this.setUint16(byteOffset, doubleToFloat16Bits(value), !!littleEndian);
+// SetViewValue order: brand check, ToIndex(byteOffset), ToNumber(value), then the
+// bounds/detached checks (left to the native setUint16).
+export const dataViewSetFloat16 = function setFloat16(this: any, byteOffset: any, value: any): void {
+  if (objectToString.call(this) !== '[object DataView]') {
+    throw new TypeError('DataView.prototype.setFloat16 called on an incompatible receiver');
+  }
+  // inlined: ToIndex(byteOffset)
+  let index = +byteOffset;
+  index = index !== index ? 0 : index < 0 ? Math.ceil(index) : Math.floor(index);
+  if (index < 0 || index > 9007199254740991) {
+    throw new RangeError('DataView.prototype.setFloat16: offset is out of bounds');
+  }
+  const bits = doubleToFloat16Bits(+value);
+  this.setUint16(index + 0, bits, !!(arguments.length > 2 && arguments[2]));
 };
 
 export const install = (): void => {

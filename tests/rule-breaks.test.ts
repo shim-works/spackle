@@ -174,6 +174,54 @@ describe('rule breaks — GC and look-native fixes', () => {
 });
 
 describe('rule breaks — install-time fixes', () => {
+  it('Promise jobs share queueMicrotask\'s FIFO queue (one queue, core-js\'s shape)', async () => {
+    // Chrome 41's shape: spackle's own queueMicrotask (a batched queue), not the
+    // engine's, whose microtasks would interleave with any drain anyway.
+    const w: any = window;
+    const native = w.Promise;
+    const savedQM = Object.getOwnPropertyDescriptor(w, 'queueMicrotask')!;
+    vi.resetModules();
+    try {
+      const { queueMicrotask: spackleQM } = await import('../src/modules/web.queue-microtask.js');
+      Object.defineProperty(w, 'queueMicrotask', { value: spackleQM, writable: true, configurable: true });
+      const { install } = await import('../src/modules/es.promise.js');
+      install();
+      const log: string[] = [];
+      await new native((done: () => void) => {
+        w.queueMicrotask(() => log.push('a'));
+        w.Promise.resolve().then(() => log.push('b'));
+        w.queueMicrotask(() => log.push('c'));
+        w.queueMicrotask(() => w.queueMicrotask(done));
+      });
+      expect(log).toEqual(['a', 'b', 'c']);
+    } finally {
+      Object.defineProperty(w, 'queueMicrotask', savedQM);
+      w.Promise = native;
+      vi.resetModules();
+    }
+  });
+
+  it('Promise falls back to its own queue when there is no queueMicrotask', async () => {
+    const w: any = window;
+    const native = w.Promise;
+    const savedQM = Object.getOwnPropertyDescriptor(w, 'queueMicrotask')!;
+    vi.resetModules();
+    try {
+      const { install } = await import('../src/modules/es.promise.js');
+      delete w.queueMicrotask;
+      install();
+      Object.defineProperty(w, 'queueMicrotask', savedQM);
+      const value = await new native((resolve: (v: any) => void) => {
+        w.Promise.resolve(7).then(resolve);
+      });
+      expect(value).toBe(7);
+    } finally {
+      Object.defineProperty(w, 'queueMicrotask', savedQM);
+      w.Promise = native;
+      vi.resetModules();
+    }
+  });
+
   it('Promise swap strips promise-polyfill any/allSettled so the gates decide', async () => {
     const w: any = window;
     const native = w.Promise;
@@ -184,6 +232,16 @@ describe('rule breaks — install-time fixes', () => {
       expect(w.Promise).not.toBe(native);
       expect(w.Promise.any).toBeUndefined();
       expect(w.Promise.allSettled).toBeUndefined();
+      // statics and methods hidden like built-ins (core-js's shape)
+      expect(Object.keys(w.Promise)).toEqual([]);
+      expect(Object.keys(w.Promise.prototype)).toEqual([]);
+      // catch(f) is this.then(undefined, f), not then(null, f)
+      let seen: any[] = [];
+      const fake: any = { then(this: any, a: any, b: any) { seen = [a, b]; return 'r'; } };
+      const f = () => 0;
+      expect(w.Promise.prototype.catch.call(fake, f)).toBe('r');
+      expect(seen[0]).toBeUndefined();
+      expect(seen[1]).toBe(f);
     } finally {
       w.Promise = native;
       vi.resetModules();
@@ -208,6 +266,13 @@ describe('rule breaks — install-time fixes', () => {
       expect(e instanceof Fake).toBe(true);
       expect(e.code).toBe(12);
       expect(w.DOMException.SYNTAX_ERR).toBe(12);
+      // WebIDL shape on the shared prototype: frozen prototype property, all 25
+      // constants on both sides, the class string
+      const pd = Object.getOwnPropertyDescriptor(w.DOMException, 'prototype')!;
+      expect([pd.writable, pd.enumerable, pd.configurable]).toEqual([false, false, false]);
+      expect([w.DOMException.DATA_CLONE_ERR, w.DOMException.prototype.DATA_CLONE_ERR]).toEqual([25, 25]);
+      expect(Object.prototype.toString.call(e)).toBe('[object DOMException]');
+      expect(e.hasOwnProperty('message')).toBe(false);
     } finally {
       w.DOMException = saved;
       vi.resetModules();

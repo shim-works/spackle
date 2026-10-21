@@ -15,127 +15,203 @@ export const isSupported = (): boolean => {
  */
 const PUT: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
 
-export const arrayFromAsync = function (
-  this: any,
-  source: any,
-  mapFn?: any,
-  thisArg?: any
-): any {
-  const C = this;
+// IsConstructor without calling the candidate: the native Reflect.construct
+// (captured before any polyfill) throws for a non-constructor newTarget. On
+// engines without it, a function with an own prototype is the best ES5 test.
+const nativeConstruct: any =
+  typeof Reflect !== 'undefined' && typeof (Reflect as any).construct === 'function' ? (Reflect as any).construct : undefined;
+const noArgs: any[] = [];
+const isConstructor = (C: any): boolean => {
+  if (typeof C !== 'function') return false;
+  if (nativeConstruct) {
+    try {
+      nativeConstruct(String, noArgs, C);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return Object.prototype.hasOwnProperty.call(C, 'prototype');
+};
+
+const isObject = (value: any): boolean =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+// Declared (asyncItems) for the spec length of 1; mapfn and thisArg come from arguments.
+export const arrayFromAsync = function fromAsync(this: any, asyncItems: any): any {
   if (typeof Promise === 'undefined') {
     throw new TypeError('Array.fromAsync requires Promise');
   }
-  if (mapFn !== undefined && typeof mapFn !== 'function') {
-    return Promise.reject(new TypeError('mapfn is not a function'));
-  }
-  if (source === null || source === undefined) {
-    return Promise.reject(new TypeError('Array.fromAsync called on null or undefined'));
-  }
+  const C = this;
+  const mapfn = arguments.length > 1 ? arguments[1] : undefined;
+  const thisArg = arguments.length > 2 ? arguments[2] : undefined;
 
-  const asyncIteratorKey =
-    typeof Symbol !== 'undefined' ? (Symbol as any).asyncIterator : undefined;
-  const iteratorKey =
-    typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
-
-  const boxed = Object(source);
-
-  /*
-   * `this` is the constructor (IsConstructor(C) -> Construct(C), else []). Elements
-   * go in by CreateDataPropertyOrThrow: its throw is what stops an infinite source
-   * when the target refuses the write.
-   */
-  const out: any = typeof C === 'function' ? new C() : [];
-  let index = 0;
-
-  /** CreateDataPropertyOrThrow: defineProperty throws where a plain write would not. */
-  const put = (position: number, value: any): void => {
-    // reused descriptor: a literal per element was one extra object per item
-    // limit: no try/finally (not in the baseline). If defineProperty throws,
-    // PUT holds this one value until the next element overwrites it.
-    PUT.value = value;
-    Object.defineProperty(out, String(position), PUT);
-    PUT.value = undefined;
-  };
-
-  /** Set(A, "length", k, true) -- a real array tracks it, anything else needs telling. */
-  const finish = (): any => {
-    if (!Array.isArray(out)) out.length = index;
-    return out;
-  };
-
-  const collect = (value: any): any => {
-    // await the element itself first -- a sync iterable of promises resolves
-    // its values, which is the behaviour that distinguishes this from Array.from
-    return Promise.resolve(value).then(function (awaited: any) {
-      if (mapFn === undefined) {
-        put(index, awaited);
-        return undefined;
-      }
-      return Promise.resolve(mapFn.call(thisArg, awaited, index)).then(function (
-        mapped: any
-      ) {
-        put(index, mapped);
-        return undefined;
-      });
-    });
-  };
-
-  let iterator: any;
-  let isAsync = false;
-  if (asyncIteratorKey && typeof boxed[asyncIteratorKey] === 'function') {
-    iterator = boxed[asyncIteratorKey]();
-    isAsync = true;
-  } else if (iteratorKey && typeof boxed[iteratorKey] === 'function') {
-    iterator = boxed[iteratorKey]();
-  }
-
-  if (iterator) {
-    const step = function (): any {
-      // an async iterator's next() returns a promise; a sync one doesn't --
-      // Promise.resolve normalises both
-      return Promise.resolve(iterator.next()).then(function (result: any) {
-        if (!result || typeof result !== 'object') {
-          throw new TypeError('iterator result is not an object');
-        }
-        if (result.done) {
-          return finish();
-        }
-        return collect(result.value).then(function () {
-          index++;
-          return step();
-        });
-      });
-    };
-    return Promise.resolve()
-      .then(step)
-      .then(undefined, function (error: any) {
-        // close the source on failure so it isn't left mid-iteration
-        try {
-          const method = iterator.return;
-          if (typeof method === 'function') {
-            const closed = method.call(iterator);
-            if (isAsync) return Promise.resolve(closed).then(function () {
-              throw error;
-            });
-          }
-        } catch {
-          /* ignore a misbehaving return() -- the original error matters more */
-        }
-        throw error;
-      });
-  }
-
-  // array-like fallback
-  const length = boxed.length >>> 0;
-  const step = function (): any {
-    if (index >= length) {
-      return finish();
+  // Everything below runs inside a promise job body, so every abrupt completion
+  // -- even a synchronous one -- becomes a rejection, never a throw.
+  return new Promise(function (resolve: any, reject: any) {
+    if (mapfn !== undefined && typeof mapfn !== 'function') {
+      throw new TypeError('Array.fromAsync: mapfn is not a function');
     }
-    return collect(boxed[index]).then(function () {
-      index++;
-      return step();
-    });
-  };
-  return Promise.resolve().then(step);
-};
+    if (asyncItems === null || asyncItems === undefined) {
+      throw new TypeError('Array.fromAsync called on null or undefined');
+    }
+    const asyncKey = typeof Symbol !== 'undefined' ? (Symbol as any).asyncIterator : undefined;
+    const syncKey = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : '@@iterator';
 
+    // GetMethod(asyncItems, @@asyncIterator), then @@iterator only when absent
+    let usingAsync: any = asyncKey ? asyncItems[asyncKey] : undefined;
+    if (usingAsync === null) usingAsync = undefined;
+    if (usingAsync !== undefined && typeof usingAsync !== 'function') {
+      throw new TypeError('Array.fromAsync: @@asyncIterator is not a function');
+    }
+    let usingSync: any;
+    if (usingAsync === undefined && syncKey) {
+      usingSync = asyncItems[syncKey];
+      if (usingSync === null) usingSync = undefined;
+      if (usingSync !== undefined && typeof usingSync !== 'function') {
+        throw new TypeError('Array.fromAsync: @@iterator is not a function');
+      }
+    }
+
+    if (usingAsync !== undefined || usingSync !== undefined) {
+      const A: any = isConstructor(C) ? new C() : [];
+      const isAsync = usingAsync !== undefined;
+      const iterator = (isAsync ? usingAsync : usingSync).call(asyncItems);
+      if (!isObject(iterator)) throw new TypeError('Array.fromAsync: iterator is not an object');
+      const next = iterator.next;
+      let k = 0;
+
+      // Close the source after a mapfn / definition / value-await failure; errors
+      // from next(), done or value themselves never close it.
+      const closeThenReject = function (error: any): void {
+        let closing: any;
+        try {
+          const ret = iterator['return'];
+          if (ret !== undefined && ret !== null) closing = ret.call(iterator);
+        } catch {
+          /* the original error wins over a throwing return() */
+        }
+        if (isAsync) {
+          Promise.resolve(closing).then(function () { reject(error); }, function () { reject(error); });
+        } else {
+          reject(error);
+        }
+      };
+
+      const store = function (value: any): void {
+        try {
+          if (k >= 9007199254740991) throw new TypeError('Array.fromAsync: too many elements');
+          PUT.value = value;
+          Object.defineProperty(A, k, PUT);
+          PUT.value = undefined;
+        } catch (error) {
+          PUT.value = undefined;
+          closeThenReject(error);
+          return;
+        }
+        k++;
+        step();
+      };
+
+      const mapAndStore = function (value: any): void {
+        if (mapfn === undefined) {
+          store(value);
+          return;
+        }
+        let mapped: any;
+        try {
+          mapped = mapfn.call(thisArg, value, k);
+        } catch (error) {
+          closeThenReject(error);
+          return;
+        }
+        // Await(mappedValue): exactly one await per element
+        Promise.resolve(mapped).then(store, closeThenReject);
+      };
+
+      const onResult = function (result: any): void {
+        try {
+          if (!isObject(result)) throw new TypeError('Array.fromAsync: iterator result is not an object');
+          if (result.done) {
+            A.length = k;
+            resolve(A);
+            return;
+          }
+          const value = result.value;
+          if (isAsync) {
+            // an async iterator's values are used as they come, not awaited again
+            mapAndStore(value);
+          } else {
+            // CreateAsyncFromSyncIterator awaits each value; a rejection closes the source
+            Promise.resolve(value).then(mapAndStore, closeThenReject);
+          }
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      const step = function (): void {
+        let result: any;
+        try {
+          result = next.call(iterator);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        if (isAsync) Promise.resolve(result).then(onResult, reject);
+        else onResult(result);
+      };
+
+      step();
+      return;
+    }
+
+    // array-like path: ToObject, LengthOfArrayLike, Construct(C, [len])
+    const arrayLike = Object(asyncItems);
+    let length = +arrayLike.length;
+    length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
+    const A: any = isConstructor(C) ? new C(length) : new Array(length);
+    let k = 0;
+    const store = function (value: any): void {
+      try {
+        PUT.value = value;
+        Object.defineProperty(A, k, PUT);
+        PUT.value = undefined;
+      } catch (error) {
+        PUT.value = undefined;
+        reject(error);
+        return;
+      }
+      k++;
+      step();
+    };
+    const mapAndStore = function (value: any): void {
+      if (mapfn === undefined) {
+        store(value);
+        return;
+      }
+      let mapped: any;
+      try {
+        mapped = mapfn.call(thisArg, value, k);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      Promise.resolve(mapped).then(store, reject);
+    };
+    const step = function (): void {
+      try {
+        if (k >= length) {
+          A.length = length;
+          resolve(A);
+          return;
+        }
+        // Await(Get(arrayLike, k))
+        Promise.resolve(arrayLike[k]).then(mapAndStore, reject);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    step();
+  });
+};

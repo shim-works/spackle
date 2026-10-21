@@ -1,7 +1,22 @@
 // String.prototype.startsWith: existence-only (no half-broken native in range).
+// core-js's correctIsRegExpLogic: the native must reject a RegExp, yet accept
+// one whose @@match is false, because IsRegExp reads @@match. Chrome 41 and
+// Safari 9 have no Symbol.match of their own, so they reject both and are
+// replaced.
 export const isSupported = (): boolean => {
   try {
-    return typeof String.prototype.startsWith === 'function';
+    if (typeof String.prototype.startsWith !== 'function') return false;
+    const matchKey = typeof Symbol !== 'undefined' ? (Symbol as any).match : undefined;
+    if (!matchKey) return true; // nothing for IsRegExp to read
+    const regexp: any = /./;
+    try {
+      ('/./' as any).startsWith(regexp);
+      return false;
+    } catch (e) {
+      /* a RegExp is refused, as it should be */
+    }
+    regexp[matchKey] = false;
+    return ('/./' as any).startsWith(regexp) === true;
   } catch {
     return false;
   }
@@ -10,19 +25,23 @@ export const isSupported = (): boolean => {
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.startswith */
 
 // IsRegExp: @@match decides when present, else the RegExp brand (not instanceof).
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
+const toStr = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
 const objectToString = Object.prototype.toString;
 
-export const stringStartsWith = function (
-  this: string,
-  search: any,
-  start?: number,
-): boolean {
+// Declared (searchString) for the spec length of 1; the position comes from arguments.
+export const stringStartsWith = function startsWith(this: any, search: any): boolean {
+  const start = arguments.length > 1 ? arguments[1] : undefined;
   // RequireObjectCoercible + ToString(this) first: `this` can be any value
   // (`String.prototype.startsWith.call(12345, '12')`), not only a string.
   if (this === null || this === undefined) {
     throw new TypeError('String.prototype.startsWith called on null or undefined');
   }
-  const s = typeof this === 'string' ? this : String(this); // String() is a call Chrome 41 won't inline; skip it on the primitive path
+  const s = toStr(this);
   // inlined: isRegExp(search) -- primitives skip straight past
   let isRegExpValue = false;
   if (search !== null && (typeof search === 'object' || typeof search === 'function')) {
@@ -36,7 +55,7 @@ export const stringStartsWith = function (
     );
   }
 
-  const searchString = String(search);
+  const searchString = toStr(search);
   let position = 0;
   if (start !== undefined) {
     // inlined: toInteger(start)
