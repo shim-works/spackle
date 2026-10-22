@@ -53,7 +53,7 @@ It runs on a real TV and on an emulator capped at a 128 MB heap:
 ## Coverage
 
 - **Aiming for the same coverage as core-js or better.**
-- **Known gaps on Safari 7.1**, where core-js does better:
+- **Known gaps on Safari 7.1 (for now)**, where core-js does better:
   - `Array#find`, `findIndex`, `sort`, `keys` and `entries`: spackle keeps
     Safari's native versions, which mishandle holes, huge lengths, sort
     stability and iterator shape.
@@ -142,7 +142,7 @@ legacy({
 ## Important Notes
 
 - **Browser only.** spackle expects `window`. It isn't meant for Node or web
-  workers. It supports Chrome 38+ and Safari 7.1+ (2015 era).
+  workers. It supports webviews based on Chrome 38+ and Safari 7.1+.
 - **Ship ES5 to old engines.** spackle covers built-ins, not syntax. Your own
   code still needs transpiling down to your target with tools like [Babel](https://babeljs.io).
 - **Known limits** are listed in each module's source under "Known limitations"
