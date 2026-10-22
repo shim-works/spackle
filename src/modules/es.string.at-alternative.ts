@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof String.prototype.at === 'function';
+    // core-js: at() indexes code units, not code points
+    return typeof String.prototype.at === 'function' && ('\uD842\uDFB7' as any).at(-2) === '\uD842';
   } catch {
     return false;
   }

@@ -11,7 +11,28 @@ export const isSupported = (): boolean => {
     if (new RegExp('x', 'gi').flags !== 'gi') return false;
     if (new RegExp('x').flags !== '') return false;
     // spec order is d g i m s u v y, not the order the flags were written in
-    return new RegExp('x', 'ig').flags === 'gi';
+    if (new RegExp('x', 'ig').flags !== 'gi') return false;
+
+    // core-js's regexp-flags-detection: the getter reads each flag property with
+    // Get, in spec order, and builds from what it read (Chrome 49-? read gimuy only)
+    let indices = true;
+    try {
+      new RegExp('.', 'd');
+    } catch (e) {
+      indices = false;
+    }
+    const expected = indices ? 'dgimsy' : 'gimsy';
+    const pairs: any = { dotAll: 's', global: 'g', ignoreCase: 'i', multiline: 'm', sticky: 'y' };
+    if (indices) pairs.hasIndices = 'd';
+    let calls = '';
+    const O: any = {};
+    for (const key in pairs) {
+      (function (chr: string) {
+        Object.defineProperty(O, key, { get: function () { calls += chr; return true; } });
+      })(pairs[key]);
+    }
+    const result = (Object.getOwnPropertyDescriptor(RegExp.prototype, 'flags') as any).get.call(O);
+    return result === expected && calls === expected;
   } catch {
     return false;
   }

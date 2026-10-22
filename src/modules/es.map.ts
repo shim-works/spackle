@@ -243,26 +243,11 @@ const closeIterator = (iterator: any): void => {
   }
 };
 
-export const Map = function (this: any) {
-  if (!(this instanceof Map)) {
-    throw new TypeError("Constructor Map requires 'new'");
-  }
-  // Non-enumerable, like a native slot.
-  // inlined: slot(this, '_keys', ...)
-  SLOT.value = [];
-  Object.defineProperty(this, '_keys', SLOT);
-  SLOT.value = undefined; // never pin the last value
-  // inlined: slot(this, '_vals', ...)
-  SLOT.value = [];
-  Object.defineProperty(this, '_vals', SLOT);
-  SLOT.value = undefined; // never pin the last value
-
-  const iterable = arguments.length > 0 ? arguments[0] : undefined;
-  if (iterable === null || iterable === undefined) {
-    return;
-  }
+// The iterable half of the constructor, shared by the polyfill and the wrapper
+// around a native that ignores iterables.
+const addEntries = (target: any, iterable: any): void => {
   // Get(map, "set") happens for every iterable, even an empty one
-  const adder = this.set;
+  const adder = target.set;
   if (typeof adder !== 'function') {
     throw new TypeError('Map constructor: this.set is not a function');
   }
@@ -276,7 +261,7 @@ export const Map = function (this: any) {
       if (item === null || (typeof item !== 'object' && typeof item !== 'function')) {
         throw new TypeError('Iterator value is not an entry object');
       }
-      adder.call(this, item[0], item[1]);
+      adder.call(target, item[0], item[1]);
     }
     return;
   }
@@ -304,12 +289,30 @@ export const Map = function (this: any) {
       if (item === null || (typeof item !== 'object' && typeof item !== 'function')) {
         throw new TypeError('Iterator value is not an entry object');
       }
-      adder.call(this, item[0], item[1]);
+      adder.call(target, item[0], item[1]);
     } catch (error) {
       closeIterator(iterator);
       throw error;
     }
   }
+};
+
+export const Map = function (this: any) {
+  if (!(this instanceof Map)) {
+    throw new TypeError("Constructor Map requires 'new'");
+  }
+  // Non-enumerable, like a native slot.
+  // inlined: slot(this, '_keys', ...)
+  SLOT.value = [];
+  Object.defineProperty(this, '_keys', SLOT);
+  SLOT.value = undefined; // never pin the last value
+  // inlined: slot(this, '_vals', ...)
+  SLOT.value = [];
+  Object.defineProperty(this, '_vals', SLOT);
+  SLOT.value = undefined; // never pin the last value
+
+  const iterable = arguments.length > 0 ? arguments[0] : undefined;
+  if (iterable !== null && iterable !== undefined) addEntries(this, iterable);
 } as any;
 
 Map.prototype.set = function (this: any, key: any, value: any): any {
@@ -554,12 +557,144 @@ if (hasSymbol && (Symbol as any).toStringTag) {
   Object.defineProperty(MapIterator.prototype, (Symbol as any).toStringTag, { value: 'Map Iterator', writable: false, enumerable: false, configurable: true });
 }
 
-export const install = (): void => {
+/*
+ * core-js collection.js REPLACE: a native Map is replaced outright only when it
+ * is missing, lacks a method, or its entries() iterator cannot step. Anything
+ * less (no iterable constructor, -0, no chaining) is fixed on top of the native
+ * by installMapExtensionsOnNative, which keeps native-speed storage and forEach
+ * (Safari 7.1/8, Chrome 38-41).
+ */
+const nativeUnusable = (): boolean => {
+  try {
+    const Native = (window as any).Map;
+    if (typeof Native !== 'function') return true;
+    const proto = Native.prototype;
+    const names = ['set', 'get', 'has', 'delete', 'clear', 'forEach', 'keys', 'values', 'entries'];
+    for (let i = 0; i < names.length; i++) if (typeof proto[names[i]] !== 'function') return true;
+    new Native().entries().next();
+    return false;
+  } catch (e) {
+    return true;
+  }
+};
+
+const installMapPolyfill = (): void => {
+  if (!nativeUnusable()) return;
   // null-then-delete: on some engines a bare delete of a non-configurable
   // global is a no-op, and the write clears the old binding either way.
   (window as any).Map = null;
   delete (window as any).Map;
   define((window as any), 'Map', Map);
+};
+
+/*
+ * A native kept by nativeUnusable() can still store -0 as -0 (Chrome 38; core-js's
+ * collection.js BUGGY_ZERO). set(-0) must keep +0: the native set is
+ * wrapped to normalise the key, and the lookups too where they miss +0 for -0.
+ * Patched on top of the native, as es.weak-map does for symbol keys.
+ */
+export const installMapExtensionsOnNative = (): void => {
+  const Native = (window as any).Map;
+  if (typeof Native !== 'function' || Native === Map) return;
+  const proto = Native.prototype;
+  const nativeAdder = proto.set;
+  let storesNegativeZero = false;
+  let lookupMissesZero = false;
+  let hasntChaining = false;
+  try {
+    const probe = new Native();
+    hasntChaining = nativeAdder.call(probe, -0, 1) !== probe;
+    probe.forEach(function () {
+      // the key / value is the callback's second / first argument
+      const k = arguments[1];
+      if (k === 0 && 1 / k < 0) storesNegativeZero = true;
+    });
+    const zero = new Native();
+    nativeAdder.call(zero, 0, 1);
+    lookupMissesZero = !zero.has(-0);
+  } catch (e) {
+    return;
+  }
+  if (storesNegativeZero || hasntChaining) define(proto, 'set', function set(this: any, key: any, value: any): any {
+    nativeAdder.call(this, key === 0 ? 0 : key, value);
+    return this;
+  });
+  if (lookupMissesZero) {
+    const names = ['has', 'get', 'delete'];
+    for (let i = 0; i < names.length; i++) {
+      const nativeLookup = proto[names[i]];
+      define(proto, names[i], function (this: any, key: any): any {
+        return nativeLookup.call(this, key === 0 ? 0 : key);
+      });
+    }
+  }
+  if (!nativeAcceptsIterables(Native)) wrapNativeConstructor(Native);
+};
+
+// core-js ACCEPT_ITERABLES: entries go in, and a bad entry closes the iterator.
+const nativeAcceptsIterables = (Native: any): boolean => {
+  try {
+    if (new Native([[1, 2]]).get(1) !== 2) return false;
+    const key = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+    if (typeof key !== 'symbol') return true; // nothing else is iterable here
+    let closed = false;
+    const bad: any = {};
+    bad[key] = function () {
+      return {
+        next: function () { return { done: false, value: 1 }; },
+        'return': function () { closed = true; return {}; },
+      };
+    };
+    try {
+      new Native(bad);
+    } catch (e) {
+      return closed;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+};
+
+// The native's storage and methods stay; only construction goes through this.
+// A subclass instance gets its own prototype (core-js inheritIfRequired).
+const wrapNativeConstructor = (Native: any): void => {
+  const proto = Native.prototype;
+  const getProto = Object.getPrototypeOf;
+  const Wrapped: any = function Map(this: any) {
+    if (!(this instanceof Wrapped)) throw new TypeError("Constructor Map requires 'new'");
+    const that = new Native();
+    const own = getProto(this);
+    if (own !== proto) {
+      if (typeof Object.setPrototypeOf === 'function') Object.setPrototypeOf(that, own);
+      else that.__proto__ = own;
+    }
+    const iterable = arguments.length > 0 ? arguments[0] : undefined;
+    if (iterable !== null && iterable !== undefined) addEntries(that, iterable);
+    return that;
+  };
+  Wrapped.prototype = proto;
+  Object.defineProperty(proto, 'constructor', { value: Wrapped, writable: true, enumerable: false, configurable: true });
+  // statics: @@species, and anything already installed on the native
+  const names: any[] = Object.getOwnPropertyNames(Native);
+  if (typeof Object.getOwnPropertySymbols === 'function') {
+    const symbols = Object.getOwnPropertySymbols(Native);
+    for (let i = 0; i < symbols.length; i++) names.push(symbols[i]);
+  }
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (name === 'prototype' || name === 'length' || name === 'name' || name === 'arguments' || name === 'caller') continue;
+    const d = Object.getOwnPropertyDescriptor(Native, name);
+    if (d) Object.defineProperty(Wrapped, name, d);
+  }
+  (window as any).Map = null;
+  delete (window as any).Map;
+  define((window as any), 'Map', Wrapped);
+};
+
+export const install = (): void => {
+  installMapPolyfill();
+  installMapExtensionsOnNative();
 };
 
 // Prototype defaults for the tombstone fields -- see `own` above.

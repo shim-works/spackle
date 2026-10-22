@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Math.asinh === 'function';
+    // asinh(0) must be +0, not -0 (core-js)
+    return typeof Math.asinh === 'function' && 1 / Math.asinh(0) > 0;
   } catch {
     return false;
   }

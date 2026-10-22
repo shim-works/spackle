@@ -99,16 +99,37 @@ const stepValue = (record: any): any => {
   }
 };
 
-// One descriptor for CreateArrayFromList, reused; cleared after each list.
+// CreateArrayFromList, once per call: a plain write unless Array.prototype holds
+// something at that index (then defineProperty, so no setter is reached).
+const ArrayProto = Array.prototype;
 const LIST: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
 const arrayFromList = (list: any, length: number): any[] => {
   const out: any[] = [];
   for (let i = 0; i < length; i++) {
-    LIST.value = list[i];
-    Object.defineProperty(out, i, LIST);
+    if (i in ArrayProto) {
+      LIST.value = list[i];
+      Object.defineProperty(out, i, LIST);
+      LIST.value = undefined;
+    } else {
+      out[i] = list[i];
+    }
   }
-  LIST.value = undefined;
   return out;
+};
+
+// The reject element function for one input: a factory over one per-call state
+// record, so the walk below closes over nothing (see es.promise.all-settled).
+const subscribeElement = (state: any, index: number, nextPromise: any): void => {
+  let alreadyCalled = false;
+  const onRejected = builtinClosure(function (x: any) {
+    if (alreadyCalled) return undefined;
+    alreadyCalled = true;
+    state.errors[index] = x;
+    if (--state.remaining === 0) return state.capability.reject(makeAggregateError(arrayFromList(state.errors, state.count)));
+    return undefined;
+  });
+  // the capability's own resolve is the fulfilment reaction
+  nextPromise.then(state.capability.resolve, onRejected);
 };
 
 // %AggregateError%: the live one (native, or spackle's, which installs with
@@ -130,29 +151,18 @@ export const promiseAny = function any(this: any, iterable: any) {
     const promiseResolve = C.resolve;
     if (typeof promiseResolve !== 'function') throw new TypeError('Promise resolve is not callable');
     record = getIteratorRecord(iterable);
-    const errors: any = Object.create(null);
-    let count = 0;
-    let remaining = 1;
+    const state = { errors: Object.create(null), count: 0, remaining: 1, capability: capability };
     for (;;) {
       const value = stepValue(record);
       if (value === DONE) {
-        if (--remaining === 0) capability.reject(makeAggregateError(arrayFromList(errors, count)));
+        if (--state.remaining === 0) capability.reject(makeAggregateError(arrayFromList(state.errors, state.count)));
         return capability.promise;
       }
-      const index = count++;
-      errors[index] = undefined;
+      const index = state.count++;
+      state.errors[index] = undefined;
       const nextPromise = promiseResolve.call(C, value);
-      let alreadyCalled = false;
-      const onRejected = builtinClosure(function (x: any) {
-        if (alreadyCalled) return undefined;
-        alreadyCalled = true;
-        errors[index] = x;
-        if (--remaining === 0) return capability.reject(makeAggregateError(arrayFromList(errors, count)));
-        return undefined;
-      });
-      remaining++;
-      // the capability's own resolve is the fulfilment reaction
-      nextPromise.then(capability.resolve, onRejected);
+      state.remaining++;
+      subscribeElement(state, index, nextPromise);
     }
   } catch (error) {
     if (record !== null && !record.done && record.iterator !== null) closeIterator(record.iterator);

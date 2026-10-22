@@ -17,7 +17,9 @@ export const isSupported = (): boolean => {
           return 0;
         },
       });
-      if (Object.assign({ b: 1 }, first, { b: 2 }).b !== 1) return false;
+      // core-js's shape: b sits on the getter's own object, so reading a hides
+      // it before it is copied (Edge bug). A third source would just write b.
+      if (Object.assign({ b: 1 }, Object.assign(first, { b: 2 })).b !== 1) return false;
     }
 
     // Detect engines whose own-key enumeration order is not preserved.

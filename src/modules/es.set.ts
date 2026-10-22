@@ -215,22 +215,11 @@ const closeIterator = (iterator: any): void => {
   }
 };
 
-export const Set = function (this: any) {
-  if (!(this instanceof Set)) {
-    throw new TypeError("Constructor Set requires 'new'");
-  }
-  // Non-enumerable, like a native slot.
-  // inlined: slot(this, '_values', ...)
-  SLOT.value = [];
-  Object.defineProperty(this, '_values', SLOT);
-  SLOT.value = undefined; // never pin the last value
-
-  const iterable = arguments.length > 0 ? arguments[0] : undefined;
-  if (iterable === null || iterable === undefined) {
-    return;
-  }
+// The iterable half of the constructor, shared by the polyfill and the wrapper
+// around a native that ignores iterables.
+const addValues = (target: any, iterable: any): void => {
   // Get(set, "add") happens for every iterable, even an empty one
-  const adder = this.add;
+  const adder = target.add;
   if (typeof adder !== 'function') {
     throw new TypeError('Set constructor: this.add is not a function');
   }
@@ -241,7 +230,7 @@ export const Set = function (this: any) {
   if (Array.isArray(iterable) && (!hasSymbol || (iterable[(Symbol as any).iterator] === arrayIterAtLoad && (Array.prototype as any)[(Symbol as any).iterator] === arrayIterAtLoad))) {
     for (let i = 0; i < iterable.length; i++) {
       const item = iterable[i];
-      adder.call(this, item);
+      adder.call(target, item);
     }
     return;
   }
@@ -266,12 +255,26 @@ export const Set = function (this: any) {
     }
     const item = step.value;
     try {
-      adder.call(this, item);
+      adder.call(target, item);
     } catch (error) {
       closeIterator(iterator);
       throw error;
     }
   }
+};
+
+export const Set = function (this: any) {
+  if (!(this instanceof Set)) {
+    throw new TypeError("Constructor Set requires 'new'");
+  }
+  // Non-enumerable, like a native slot.
+  // inlined: slot(this, '_values', ...)
+  SLOT.value = [];
+  Object.defineProperty(this, '_values', SLOT);
+  SLOT.value = undefined; // never pin the last value
+
+  const iterable = arguments.length > 0 ? arguments[0] : undefined;
+  if (iterable !== null && iterable !== undefined) addValues(this, iterable);
 } as any;
 
 Set.prototype.add = function (this: any, value: any): any {
@@ -488,12 +491,153 @@ if (hasSymbol && (Symbol as any).toStringTag) {
   Object.defineProperty(SetIterator.prototype, (Symbol as any).toStringTag, { value: 'Set Iterator', writable: false, enumerable: false, configurable: true });
 }
 
-export const install = (): void => {
+/*
+ * core-js collection.js REPLACE: a native Set is replaced outright only when it
+ * is missing, lacks a method, or its entries() iterator cannot step. Anything
+ * less (no iterable constructor, -0, no chaining) is fixed on top of the native
+ * by installSetExtensionsOnNative, which keeps native-speed storage and forEach
+ * (Safari 7.1/8, Chrome 38-41).
+ */
+const nativeUnusable = (): boolean => {
+  try {
+    const Native = (window as any).Set;
+    if (typeof Native !== 'function') return true;
+    const proto = Native.prototype;
+    const names = ['add', 'has', 'delete', 'clear', 'forEach', 'keys', 'values', 'entries'];
+    for (let i = 0; i < names.length; i++) if (typeof proto[names[i]] !== 'function') return true;
+    new Native().entries().next();
+    return false;
+  } catch (e) {
+    return true;
+  }
+};
+
+const installSetPolyfill = (): void => {
+  if (!nativeUnusable()) return;
   // null-then-delete: on some engines a bare delete of a non-configurable
   // global is a no-op, and the write clears the old binding either way.
   (window as any).Set = null;
   delete (window as any).Set;
   define((window as any), 'Set', Set);
+};
+
+/*
+ * A native kept by nativeUnusable() can still store -0 as -0 (Chrome 38; core-js's
+ * collection.js BUGGY_ZERO). add(-0) must keep +0: the native add is
+ * wrapped to normalise the key, and the lookups too where they miss +0 for -0.
+ * Patched on top of the native, as es.weak-map does for symbol keys.
+ */
+export const installSetExtensionsOnNative = (): void => {
+  const Native = (window as any).Set;
+  if (typeof Native !== 'function' || Native === Set) return;
+  const proto = Native.prototype;
+  const nativeAdder = proto.add;
+  let storesNegativeZero = false;
+  let lookupMissesZero = false;
+  let hasntChaining = false;
+  try {
+    const probe = new Native();
+    hasntChaining = nativeAdder.call(probe, -0) !== probe;
+    probe.forEach(function () {
+      // the key / value is the callback's second / first argument
+      const k = arguments[0];
+      if (k === 0 && 1 / k < 0) storesNegativeZero = true;
+    });
+    const zero = new Native();
+    nativeAdder.call(zero, 0);
+    lookupMissesZero = !zero.has(-0);
+  } catch (e) {
+    return;
+  }
+  if (storesNegativeZero || hasntChaining) define(proto, 'add', function add(this: any, value: any): any {
+    nativeAdder.call(this, value === 0 ? 0 : value);
+    return this;
+  });
+  if (lookupMissesZero) {
+    const names = ['has', 'delete'];
+    for (let i = 0; i < names.length; i++) {
+      const nativeLookup = proto[names[i]];
+      define(proto, names[i], function (this: any, key: any): any {
+        return nativeLookup.call(this, key === 0 ? 0 : key);
+      });
+    }
+  }
+  if (!nativeAcceptsIterables(Native)) wrapNativeConstructor(Native);
+};
+
+// core-js ACCEPT_ITERABLES: values go in, and a throwing add closes the iterator.
+const nativeAcceptsIterables = (Native: any): boolean => {
+  try {
+    if (!new Native([1]).has(1)) return false;
+    const key = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+    if (typeof key !== 'symbol') return true; // nothing else is iterable here
+    // a throwing add is the only per-item failure a Set has. Reached through a
+    // subclass, never by writing to the native prototype (that would knock the
+    // engine's Set methods off their fast path for the whole page)
+    const R: any = typeof Reflect !== 'undefined' ? Reflect : undefined;
+    if (!R || typeof R.construct !== 'function') return true;
+    let closed = false;
+    const STOP = {};
+    const Sub: any = function () {};
+    Sub.prototype = Object.create(Native.prototype);
+    Sub.prototype.add = function () { throw STOP; };
+    const bad: any = {};
+    bad[key] = function () {
+      return {
+        next: function () { return { done: false, value: 1 }; },
+        'return': function () { closed = true; return {}; },
+      };
+    };
+    try {
+      R.construct(Native, [bad], Sub);
+    } catch (e) {
+      return e === STOP && closed;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+};
+
+// The native's storage and methods stay; only construction goes through this.
+// A subclass instance gets its own prototype (core-js inheritIfRequired).
+const wrapNativeConstructor = (Native: any): void => {
+  const proto = Native.prototype;
+  const getProto = Object.getPrototypeOf;
+  const Wrapped: any = function Set(this: any) {
+    if (!(this instanceof Wrapped)) throw new TypeError("Constructor Set requires 'new'");
+    const that = new Native();
+    const own = getProto(this);
+    if (own !== proto) {
+      if (typeof Object.setPrototypeOf === 'function') Object.setPrototypeOf(that, own);
+      else that.__proto__ = own;
+    }
+    const iterable = arguments.length > 0 ? arguments[0] : undefined;
+    if (iterable !== null && iterable !== undefined) addValues(that, iterable);
+    return that;
+  };
+  Wrapped.prototype = proto;
+  Object.defineProperty(proto, 'constructor', { value: Wrapped, writable: true, enumerable: false, configurable: true });
+  // statics: @@species, and anything already installed on the native
+  const names: any[] = Object.getOwnPropertyNames(Native);
+  if (typeof Object.getOwnPropertySymbols === 'function') {
+    const symbols = Object.getOwnPropertySymbols(Native);
+    for (let i = 0; i < symbols.length; i++) names.push(symbols[i]);
+  }
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (name === 'prototype' || name === 'length' || name === 'name' || name === 'arguments' || name === 'caller') continue;
+    const d = Object.getOwnPropertyDescriptor(Native, name);
+    if (d) Object.defineProperty(Wrapped, name, d);
+  }
+  (window as any).Set = null;
+  delete (window as any).Set;
+  define((window as any), 'Set', Wrapped);
+};
+
+export const install = (): void => {
+  installSetPolyfill();
+  installSetExtensionsOnNative();
 };
 
 // Prototype defaults for the tombstone fields -- see `own` above.

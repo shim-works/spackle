@@ -57,9 +57,6 @@
     "build:browser-tests": "node scripts/build-browser-tests.mjs",
     "verify:es5": "node scripts/verify-es5.mjs"
   },
-  "dependencies": {
-    "promise-polyfill": "^8.3.0"
-  },
   "devDependencies": {
     "@babel/core": "^7.26.0",
     "@babel/preset-env": "^7.26.0",

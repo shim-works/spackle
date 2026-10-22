@@ -1,5 +1,11 @@
 // A typeof check can't tell a real deep clone from a shallow stub. Check a
 // nested object and a Date before deciding whether to keep the host function.
+const clonesErrors = (E: any): boolean => {
+  const error = new E();
+  const test = (window as any).structuredClone({ a: error, b: error });
+  return !!test && test.a === test.b && test.a instanceof E && test.a.stack === error.stack;
+};
+
 export const isSupported = (): boolean => {
   try {
     if (typeof (window as any).structuredClone !== 'function') return false;
@@ -11,7 +17,11 @@ export const isSupported = (): boolean => {
       copy.a === 1 &&
       copy.nested.b === 2 &&
       copy.when instanceof Date &&
-      copy.when.getTime() === 0
+      copy.when.getTime() === 0 &&
+      // core-js checkErrorsCloning: errors clone, keep their stack, and a shared
+      // one stays shared (Chrome < 102 returned null; old Safari can't clone errors)
+      clonesErrors(Error) &&
+      (typeof (window as any).DOMException !== 'function' || clonesErrors((window as any).DOMException))
     );
   } catch {
     return false;
@@ -140,8 +150,8 @@ const cloneValue = (value: any, seen: any): any => {
   // its classof the same way). Plain objects, most of what gets cloned, go
   // straight to the copy: on Chrome 41, walking the whole chain below for an
   // object nested in another made each clone ~500x slower than core-js.
-  // promise-polyfill's instances also report [object Object], so they go on to
-  // the chain, which refuses them.
+  // A polyfilled Promise can report [object Object] (no @@toStringTag support),
+  // so promises go on to the chain, which refuses them.
   if (objectToString.call(value) === '[object Object]' && !(typeof Promise === 'function' && value instanceof Promise)) {
     const copy: any = {};
     seen.set(value, copy);
@@ -241,6 +251,11 @@ const cloneValue = (value: any, seen: any): any => {
       String(value.name),
     );
     seen.set(value, copy);
+    if (value.stack) {
+      STACK.value = value.stack;
+      Object.defineProperty(copy, 'stack', STACK);
+      STACK.value = undefined;
+    }
     return copy;
   }
   if (value instanceof Error || isDOMException) {
@@ -268,6 +283,13 @@ const cloneValue = (value: any, seen: any): any => {
     const copy = Object(value.valueOf());
     seen.set(value, copy);
     return copy;
+  }
+
+  // Platform objects are not serialisable (HTML StructuredSerializeInternal):
+  // a DOM node or a window is a DataCloneError, never a property copy. Checked
+  // here, after every serialisable type, so plain data never pays for it.
+  if ((typeof value.nodeType === 'number' && typeof value.nodeName === 'string') || value.window === value) {
+    throw cloneError('Cannot clone a platform object');
   }
 
   const copy: any = {};

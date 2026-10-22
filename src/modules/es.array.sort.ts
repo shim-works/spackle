@@ -18,7 +18,33 @@ export const isSupported = (): boolean => {
         return false;
       }
     }
-    return true;
+    // core-js's es.array.sort probes: undefined is accepted, null is refused
+    // (V8), and a null receiver throws (old WebKit's sort was not strict)
+    const test = [1, 2, 3];
+    test.sort(undefined);
+    try {
+      test.sort(null as any);
+      return false;
+    } catch (e) { /* good: null is not a comparator */ }
+    try {
+      (Array.prototype.sort as any).call(null, function () { return 1; });
+      return false;
+    } catch (e) { /* good */ }
+    // core-js's STABLE_SORT behavioural fallback: 517 items in 11 runs (old WebKit
+    // and V8 only fail past ~10 or ~512 elements; Safari 7.1 fails at 11)
+    const big: { k: string; v: number }[] = [];
+    for (let code = 65; code < 76; code++) {
+      const chr = String.fromCharCode(code);
+      const v = code === 66 || code === 69 || code === 70 || code === 72 ? 3 : code === 68 || code === 71 ? 4 : 2;
+      for (let index = 0; index < 47; index++) big.push({ k: chr + index, v: v });
+    }
+    big.sort(function (a, b) { return b.v - a.v; });
+    let order = '';
+    for (let index = 0; index < big.length; index++) {
+      const chr = big[index].k.charAt(0);
+      if (order.charAt(order.length - 1) !== chr) order += chr;
+    }
+    return order === 'DGBEFHACIJK';
   } catch {
     return false;
   }

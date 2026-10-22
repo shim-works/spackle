@@ -20,7 +20,7 @@ export const arrayFindLast = function findLast(this: any, callbackfn: any): any 
   const thisArg = arguments.length > 1 ? arguments[1] : undefined;
   for (let k = length - 1; k >= 0; k--) {
     const kValue = O[k];
-    if (callbackfn.call(thisArg, kValue, k, O)) return kValue;
+    if (thisArg === undefined ? callbackfn(kValue, k, O) : callbackfn.call(thisArg, kValue, k, O)) return kValue;
   }
   return undefined;
 };

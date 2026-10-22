@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof RegExp.escape === 'function';
+    // core-js: a leading ASCII letter is hex-escaped
+    return typeof RegExp.escape === 'function' && (RegExp as any).escape('ab') === '\\x61b';
   } catch {
     return false;
   }

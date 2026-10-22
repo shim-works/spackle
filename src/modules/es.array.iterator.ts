@@ -146,7 +146,20 @@ export const arrayEntries = function (this: any): any {
 
 export const install = (): void => {
   const iteratorKey = typeof Symbol !== "undefined" ? (Symbol as any).iterator : undefined;
-  const nativeIterator: any = iteratorKey ? (Array.prototype as any)[iteratorKey] : undefined;
+  // core-js's BUGGY_SAFARI_ITERATORS: Safari 7.1-8 ship keys/entries whose
+  // iterators have no next. Then all three (and @@iterator) are spackle's.
+  let buggyNative = false;
+  try {
+    buggyNative = typeof Array.prototype.keys === "function" && !("next" in (Array.prototype.keys as any).call([]));
+  } catch (e) {
+    buggyNative = true;
+  }
+  if (buggyNative) {
+    delete (Array.prototype as any).keys;
+    delete (Array.prototype as any).values;
+    delete (Array.prototype as any).entries;
+  }
+  const nativeIterator: any = iteratorKey && !buggyNative ? (Array.prototype as any)[iteratorKey] : undefined;
   if (typeof Array.prototype.keys !== "function") {
     Object.defineProperty(Array.prototype, "keys", {
       value: arrayKeys as any,
@@ -230,7 +243,7 @@ export const install = (): void => {
   if (
     typeof Symbol !== "undefined" &&
     (Symbol as any).iterator &&
-    !(Array.prototype as any)[(Symbol as any).iterator]
+    (buggyNative || !(Array.prototype as any)[(Symbol as any).iterator])
   ) {
     Object.defineProperty(Array.prototype as any, (Symbol as any).iterator, {
       value: Array.prototype.values,

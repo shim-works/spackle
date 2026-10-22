@@ -1,6 +1,12 @@
 export const isSupported = (): boolean => {
   try {
     if (typeof Array.prototype.slice !== 'function') return false;
+    // @@species, decided like filter/map: a native Array[@@species] getter ships
+    // with species-aware array methods (core-js arrayMethodHasSpeciesSupport)
+    const species = typeof Symbol !== 'undefined' ? (Symbol as any).species : undefined;
+    if (!species) return false;
+    const speciesDescriptor = Object.getOwnPropertyDescriptor(Array, species);
+    if (!speciesDescriptor || typeof speciesDescriptor.get !== 'function' || (speciesDescriptor.get as any).__polyfilled === true) return false;
     // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length
     // as 1 and answers at once, where on a huge real length it would walk ~2^32
     // indices (the Chrome 38 hang / OOM)
@@ -14,10 +20,6 @@ export const isSupported = (): boolean => {
 
 /**
  * Spec: https://tc39.es/ecma262/#sec-array.prototype.slice
- *
- * Known limitations:
- * - [scope] gated on ToLength only: a native that applies ToLength stays in place on engines that
- *   merely lack Symbol.species awareness.
  */
 
 // One descriptor for CreateDataPropertyOrThrow, reused by every call; value is

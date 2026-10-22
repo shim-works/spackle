@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Math.atanh === 'function';
+    // atanh(-0) must be -0 (core-js)
+    return typeof Math.atanh === 'function' && 1 / Math.atanh(-0) < 0;
   } catch {
     return false;
   }

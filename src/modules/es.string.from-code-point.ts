@@ -1,7 +1,8 @@
 // String.fromCodePoint: existence-only (no half-broken native in range).
 export const isSupported = (): boolean => {
   try {
-    return typeof String.fromCodePoint === 'function';
+    // core-js INCORRECT_LENGTH
+    return typeof String.fromCodePoint === 'function' && String.fromCodePoint.length === 1;
   } catch {
     return false;
   }

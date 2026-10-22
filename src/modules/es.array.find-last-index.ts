@@ -19,7 +19,7 @@ export const arrayFindLastIndex = function findLastIndex(this: any, callbackfn: 
   if (typeof callbackfn !== 'function') throw new TypeError('Array.prototype.findLastIndex: callback is not a function');
   const thisArg = arguments.length > 1 ? arguments[1] : undefined;
   for (let k = length - 1; k >= 0; k--) {
-    if (callbackfn.call(thisArg, O[k], k, O)) return k;
+    if (thisArg === undefined ? callbackfn(O[k], k, O) : callbackfn.call(thisArg, O[k], k, O)) return k;
   }
   return -1;
 };

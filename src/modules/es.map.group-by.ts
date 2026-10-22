@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Map.groupBy === 'function';
+    // core-js DOES_NOT_WORK_WITH_PRIMITIVES
+    return typeof Map.groupBy === 'function' && (Map as any).groupBy('ab', function (it: any) { return it; }).get('a').length === 1;
   } catch {
     return false;
   }

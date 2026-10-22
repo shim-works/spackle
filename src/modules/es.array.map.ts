@@ -70,9 +70,9 @@ export const arrayMap = function map(this: any, callbackfn: any): any[] {
   for (let k = 0; k < length; k++) {
     // holes stay holes -- the callback never sees them
     if (k in O) {
-      if (plain && !(k in ArrayProto)) A[k] = callbackfn.call(thisArg, O[k], k, O);
+      if (plain && !(k in ArrayProto)) A[k] = (thisArg === undefined ? callbackfn(O[k], k, O) : callbackfn.call(thisArg, O[k], k, O));
       else {
-        dataDesc.value = callbackfn.call(thisArg, O[k], k, O);
+        dataDesc.value = (thisArg === undefined ? callbackfn(O[k], k, O) : callbackfn.call(thisArg, O[k], k, O));
         Object.defineProperty(A, k, dataDesc);
       }
     }

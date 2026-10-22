@@ -9,9 +9,9 @@ import { install as installPromise, isSupported as promiseSupported } from '../s
  * native there too (its FORCED_PROMISE_CONSTRUCTOR fires on exactly these).
  *
  * Widening a probe means replacing natives that used to be left alone, so the
- * replacement has to be MORE conformant, not just faster. install() wires
- * promise-polyfill's rejection hook to a dispatched `unhandledrejection` event
- * — the very thing the probe rejects the native for lacking. These tests hold
+ * replacement has to be MORE conformant, not just faster. spackle's Promise
+ * dispatches `unhandledrejection` and `rejectionhandled` itself — the very
+ * thing the probe rejects the native for lacking. These tests hold
  * both halves of that bargain in place.
  */
 describe('Promise probe — conformance-gated replacement', () => {
@@ -82,65 +82,87 @@ describe('Promise probe — conformance-gated replacement', () => {
       expect(promiseSupported()).toBe(true);
     }));
 
-  it('dispatches an unhandledrejection event carrying the reason', () =>
-    withNative(() => {
-      installPromise();
-      const P: any = (window as any).Promise;
+  // A macrotask in terms of the NATIVE promise: the rejection check runs on a timer.
+  const nextTurn = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
 
-      const seen: any[] = [];
-      const listener = (event: any) => {
-        seen.push(event);
-        event.preventDefault(); // also suppresses the console fallback
-      };
-      window.addEventListener('unhandledrejection', listener);
+  it('dispatches an unhandledrejection event carrying the promise and the reason', async () => {
+    const native = (window as any).Promise;
+    installPromise();
+    const P: any = (window as any).Promise;
+    const seen: any[] = [];
+    const listener = (event: any) => {
+      seen.push(event);
+      event.preventDefault(); // also suppresses the console fallback
+    };
+    window.addEventListener('unhandledrejection', listener);
+    try {
+      const rejected = P.reject(new Error('nobody caught me'));
+      const handled = P.reject(new Error('caught'));
+      handled.catch(() => {});
+      (window as any).Promise = native;
+      await nextTurn();
+      expect(seen.length).toBe(1);
+      expect(seen[0].type).toBe('unhandledrejection');
+      expect(seen[0].reason.message).toBe('nobody caught me');
+      expect(seen[0].cancelable).toBe(true);
+      expect(seen[0].promise).toBe(rejected);
+    } finally {
+      (window as any).Promise = native;
+      window.removeEventListener('unhandledrejection', listener);
+    }
+  });
 
-      try {
-        // Drive the hook directly: promise-polyfill decides on its own timer
-        // when a rejection counts as unhandled, and that is its behaviour to
-        // own, not this test's.
-        P._unhandledRejectionFn(new Error('nobody caught me'));
+  it('fires rejectionhandled when a reported rejection is handled later', async () => {
+    const native = (window as any).Promise;
+    installPromise();
+    const P: any = (window as any).Promise;
+    (window as any).Promise = native;
+    const cancel = (event: any) => event.preventDefault();
+    const handledEvents: any[] = [];
+    const onHandled = (event: any) => handledEvents.push(event);
+    window.addEventListener('unhandledrejection', cancel);
+    window.addEventListener('rejectionhandled', onHandled);
+    try {
+      const late = P.reject('late');
+      await nextTurn();
+      late.catch(() => {});
+      await nextTurn();
+      expect(handledEvents.length).toBe(1);
+      expect(handledEvents[0].promise).toBe(late);
+      expect(handledEvents[0].reason).toBe('late');
+    } finally {
+      window.removeEventListener('unhandledrejection', cancel);
+      window.removeEventListener('rejectionhandled', onHandled);
+    }
+  });
 
-        expect(seen.length).toBe(1);
-        expect(seen[0].type).toBe('unhandledrejection');
-        expect(seen[0].reason.message).toBe('nobody caught me');
-        expect(seen[0].cancelable).toBe(true);
-        // Documented [incomplete]: promise-polyfill hands the hook the reason
-        // only, so there is no promise to report.
-        expect(seen[0].promise).toBe(null);
-      } finally {
-        window.removeEventListener('unhandledrejection', listener);
-      }
-    }));
+  it('delivers to window.onunhandledrejection exactly once, never twice', async () => {
+    const native = (window as any).Promise;
+    installPromise();
+    const P: any = (window as any).Promise;
+    (window as any).Promise = native;
+    const w: any = window;
+    const saved = w.onunhandledrejection;
 
-  it('delivers to window.onunhandledrejection exactly once, never twice', () =>
-    withNative(() => {
-      installPromise();
-      const P: any = (window as any).Promise;
-      const w: any = window;
-      const saved = w.onunhandledrejection;
-
-      /*
-       * The double-delivery case. Where `onunhandledrejection` is a real
-       * event-handler IDL attribute — every modern browser — dispatchEvent
-       * invokes it on its own, so an unconditional explicit call hands the app
-       * the same rejection twice. Chromium and WebKit caught exactly that; jsdom
-       * did not, which is why this assertion counts rather than checks presence.
-       */
-      const seen: any[] = [];
-      w.onunhandledrejection = (event: any) => {
-        seen.push(event.reason);
-      };
-      // Cancel it so the console fallback stays quiet and the test runner does
-      // not log this deliberate rejection as an escaped one.
-      const cancel = (event: any) => event.preventDefault();
-      window.addEventListener('unhandledrejection', cancel);
-
-      try {
-        P._unhandledRejectionFn('a string reason');
-        expect(seen).toEqual(['a string reason']);
-      } finally {
-        window.removeEventListener('unhandledrejection', cancel);
-        w.onunhandledrejection = saved;
-      }
-    }));
+    /*
+     * The double-delivery case. Where `onunhandledrejection` is a real
+     * event-handler IDL attribute — every modern browser — dispatchEvent
+     * invokes it on its own, so an unconditional explicit call hands the app
+     * the same rejection twice.
+     */
+    const seen: any[] = [];
+    w.onunhandledrejection = (event: any) => {
+      seen.push(event.reason);
+    };
+    const cancel = (event: any) => event.preventDefault();
+    window.addEventListener('unhandledrejection', cancel);
+    try {
+      P.reject('a string reason');
+      await nextTurn();
+      expect(seen).toEqual(['a string reason']);
+    } finally {
+      window.removeEventListener('unhandledrejection', cancel);
+      w.onunhandledrejection = saved;
+    }
+  });
 });

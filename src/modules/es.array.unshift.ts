@@ -24,6 +24,18 @@ export const isSupported = (): boolean => {
   }
 };
 
+// Safari < 13 lets a write to a read-only array length pass silently, even in
+// strict code (core-js's array-set-length). Probed once; elsewhere this is false
+// and the length write below costs nothing extra.
+const SILENT_LENGTH_SET = (function () {
+  try {
+    (Object.defineProperty([], 'length', { writable: false }) as any).length = 1;
+    return true;
+  } catch (e) {
+    return false;
+  }
+})();
+
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.unshift */
 
 // Declared (item) only, for the spec length of 1; every argument comes from arguments.
@@ -51,6 +63,10 @@ export const arrayUnshift = function unshift(this: any, _item?: any): number {
   }
   // inlined: setArrayLength(O, len + argCount) -- write, then read back, as in es.array.push
   const newLength = len + argCount;
+  // inlined: setArrayLength(O, ...) -- the TypeError Safari < 13 swallows
+  if (SILENT_LENGTH_SET && Array.isArray(O) && !(Object.getOwnPropertyDescriptor(O, 'length') as any).writable) {
+    throw new TypeError('Cannot set read only .length');
+  }
   O.length = newLength;
   if (O.length !== newLength && Array.isArray(O)) throw new TypeError('Cannot set read only .length');
   return newLength;

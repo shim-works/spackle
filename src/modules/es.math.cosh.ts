@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Math.cosh === 'function';
+    // cosh(710) overflows a naive (e^x + e^-x) / 2 (core-js)
+    return typeof Math.cosh === 'function' && Math.cosh(710) !== Infinity;
   } catch {
     return false;
   }
@@ -12,9 +13,9 @@ export const mathCosh = (x: number): number => {
   if (numeric !== numeric) {
     return numeric;
   }
-  // even function: cosh(±Infinity) is +Infinity, cosh(±0) is 1 — the formula
-  // below already lands both, so no special-casing needed
-  const e = Math.exp(numeric);
-  return (e + 1 / e) / 2;
+  // even function: cosh(±Infinity) is +Infinity, cosh(±0) is 1. Scaled by e^-1
+  // first (core-js), so e^|x| does not overflow before cosh itself does (x = 710).
+  const t = Math.exp((numeric < 0 ? -numeric : numeric) - 1);
+  return (t + 1 / (t * Math.E * Math.E)) * (Math.E / 2);
 };
 

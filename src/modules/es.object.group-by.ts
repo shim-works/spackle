@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Object.groupBy === 'function';
+    // core-js DOES_NOT_WORK_WITH_PRIMITIVES
+    return typeof Object.groupBy === 'function' && (Object as any).groupBy('ab', function (it: any) { return it; }).a.length === 1;
   } catch {
     return false;
   }

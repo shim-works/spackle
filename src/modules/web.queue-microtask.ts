@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof (window as any).queueMicrotask === 'function';
+    // core-js WRONG_ARITY
+    return typeof (window as any).queueMicrotask === 'function' && (window as any).queueMicrotask.length === 1;
   } catch {
     return false;
   }

@@ -1,6 +1,8 @@
 export const isSupported = (): boolean => {
   try {
     if (typeof Array.prototype.indexOf !== 'function') return false;
+    // core-js NEGATIVE_ZERO: a match at 0 from fromIndex -0 is +0
+    if (1 / (Array.prototype.indexOf as any).call([1], 1, -0) < 0) return false;
     // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length
     // as 1 and answers at once, where on a huge real length it would walk ~2^32
     // indices (the Chrome 38 hang / OOM)

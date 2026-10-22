@@ -12,24 +12,57 @@ and other low-powered devices.
 Every polyfill is a self-contained "island" to stop deeply nested polyfill dependencies, which greatly reduces the amount of garbage created.
 With Spackle, the garbage collector runs less often, which means less stop-the-world work for the device.
 
-| Engine | vs core-js (128 MB max heap size, single thread) |
+## Findings
+
+On old engines, spackle ran the same app workload 4–8× faster than core-js and
+made a fraction of the garbage, on a real TV, real old browsers and an emulator
+capped at a 128 MB heap. On a modern engine, with little left to polyfill, the
+two are level.
+
+| Engine | spackle vs core-js (simulated front end workload in a loop) |
 |---|---|
 | Chrome 38 | ~8× faster |
 | Safari 7.1 | ~4× faster |
 | Chrome 41 | ~7× less garbage, ~6× fewer GCs, half the heap |
+| LG UJ634 TV, 2017 (webOS 3.5, Chromium 38) | ~7× faster, ~9× less garbage, ~5× fewer GCs |
 | Chrome 80 | same speed |
 
-Measurements and method: [docs/metrics.md](docs/metrics.md).
+## Fewer garbage collections
 
-## Tested against the spec
+The test is a loop that does what a front-end framework does on each render of
+a 30-row list: props spread with `Object.assign`, keyed reconciliation with
+`Map` and `Set`, class-name checks, `new URL` and `URLSearchParams` for routing,
+and `Promise.allSettled` for data fetching. Each library runs it in its own
+iframe, in random order, with a 30-second idle between them so the first
+library's garbage is collected before the second starts. Every collection is
+counted from the browser's own performance trace.
 
-- **3,268 conformance tests**, many ported from [test262](https://github.com/tc39/test262)
-  (the official ECMAScript test suite), run in real Chromium and WebKit.
-- **The test262 suite itself** for the newer proposals (iterator helpers, base64,
-  `getOrInsert`, explicit resource management, `Array.fromAsync`, `Math.sumPrecise`
-  and others): **685 of 732 pass (94%)**, with the browser's own implementations
-  removed first so spackle's versions are the ones tested.
-- Gaps are documented in each module under "Known limitations".
+It runs on a real TV and on an emulator capped at a 128 MB heap:
+
+| | core-js | spackle |
+|---|---|---|
+| **LG UJ634 TV (2017)**, 500 passes: time | 20.5 – 23.3 s | 2.9 – 3.3 s |
+| garbage collections | 29 – 33 | 6 – 7 |
+| garbage created | 205 – 276 MB | 23 – 58 MB |
+| peak heap | 71.5 MB | 45.0 MB |
+| **Chrome 41 emulator**, 5000 passes: time | 12.06 s | 1.77 s |
+| garbage collections | 444 | 73 |
+| total GC pause | 1287 ms | 290 ms |
+| garbage created | 3.2 GB | 0.46 GB |
+
+## Coverage
+
+- **Aiming for the same coverage as core-js or better.**
+- **Known gaps on Safari 7.1**, where core-js does better:
+  - `Array#find`, `findIndex`, `sort`, `keys` and `entries`: spackle keeps
+    Safari's native versions, which mishandle holes, huge lengths, sort
+    stability and iterator shape.
+  - Typed array methods (`at`, `copyWithin`, `indexOf`, `map`, `find`, `sort`,
+    `set`, `toReversed`, `from`, `of` and others) don't work on Safari's typed
+    arrays.
+  - `Math.imul.length` reads 1, not 2.
+  - `structuredClone` clones DOM nodes instead of throwing `DataCloneError`.
+- Everything else is covered as well as core-js or better.
 
 ## Install
 
@@ -45,17 +78,7 @@ import App from './App';
 ```
 
 It installs everything it needs as a side effect. There's no config and no
-init call.
-
-### Or as a script tag
-
-No bundler? Copy `dist/index.global.js` from the package (or `spackle.js` from
-this repo) next to your app, and load it before anything else:
-
-```html
-<script src="spackle.js"></script>
-<script src="app.js"></script>
-```
+init call (for now at least).
 
 ## Remove core-js
 
@@ -119,9 +142,9 @@ legacy({
 ## Important Notes
 
 - **Browser only.** spackle expects `window`. It isn't meant for Node or web
-  workers.
+  workers. It supports Chrome 38+ and Safari 7.1+ (2015 era).
 - **Ship ES5 to old engines.** spackle covers built-ins, not syntax. Your own
-  code still needs transpiling down to your target with tools like babel.
+  code still needs transpiling down to your target with tools like [Babel](https://babeljs.io).
 - **Known limits** are listed in each module's source under "Known limitations"
   (for example: polyfilled symbols report `typeof` as `'object'`, since ES5
   can't add a primitive type).

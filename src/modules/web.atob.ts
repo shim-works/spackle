@@ -45,6 +45,8 @@ const invalidCharacterError = (): any => {
 };
 
 export const atobPolyfill = function (data: any): string {
+  // WebIDL: a missing required argument is a TypeError, not the string "undefined"
+  if (arguments.length === 0) throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
   // ASCII whitespace per the spec: tab, LF, FF, CR, space
   let input = String(data).replace(/[\t\n\f\r ]/g, '');
   if (input.length % 4 === 0) {

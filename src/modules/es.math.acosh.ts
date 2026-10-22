@@ -7,7 +7,8 @@ export const isSupported = (): boolean => {
     }
     // the overflow-prone corner: the answer must come back finite
     const big = Math.acosh(1.7976931348623157e308);
-    return big === big && big !== Infinity;
+    // core-js: floor(acosh(MAX_VALUE)) is 710, and acosh(Infinity) stays Infinity
+    return Math.floor(big) === 710 && Math.acosh(Infinity) === Infinity;
   } catch {
     return false;
   }

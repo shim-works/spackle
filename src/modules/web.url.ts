@@ -19,7 +19,31 @@ export const isSupported = (): boolean => {
     if (new URL('http://u:p@a/?#').href !== 'http://u:p@a/?#') return false;
     // no drive letters: Chromium's own differ (file:///C:/.. -> file:///b), and
     // that Windows-only quirk is no reason to replace its URL
-    return new URL('c.png', 'file:///a/b/../index.html').href === 'file:///a/c.png';
+    if (new URL('c.png', 'file:///a/b/../index.html').href !== 'file:///a/c.png') return false;
+
+    // core-js's url-constructor-detection, as is
+    const probe = new URL('b?a=1&b=2&c=3', 'https://a');
+    const params: any = probe.searchParams;
+    let result = '';
+    probe.pathname = 'c%20d';
+    params.forEach(function (value: string, key: string) {
+      params['delete']('b');
+      result += key + value;
+    });
+    const iteratorKey = typeof Symbol === 'function' ? (Symbol as any).iterator : undefined;
+    return !(
+      !params.sort ||
+      probe.href !== 'https://a/c%20d?a=1&c=3' ||
+      params.get('c') !== '3' ||
+      String(new URLSearchParams('?a=1')) !== 'a=1' ||
+      (iteratorKey && !params[iteratorKey]) ||
+      new URL('https://a@b').username !== 'a' || // throws in Edge
+      new URLSearchParams(new URLSearchParams('a=b') as any).get('a') !== 'b' ||
+      new URL('https://тест').host !== 'xn--e1aybc' || // not punycoded in Edge
+      new URL('https://a#б').hash !== '#%D0%B1' || // not escaped in Chrome 62-
+      result !== 'a1c3' || // fails in Chrome 66-
+      new URL('https://x', undefined).host !== 'x' // throws in Safari
+    );
   } catch {
     return false;
   }

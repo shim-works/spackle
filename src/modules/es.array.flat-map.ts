@@ -64,7 +64,7 @@ export const arrayFlatMap = function flatMap(this: any, mapper: any): any {
     if (!(i in O)) {
       continue;
     }
-    const mapped = mapper.call(thisArg, O[i], i, O);
+    const mapped = thisArg === undefined ? mapper(O[i], i, O) : mapper.call(thisArg, O[i], i, O);
     if (nativeIsArray(mapped)) {
       // flatten one level, skipping holes in the returned array
       let mappedLength = +mapped.length;

@@ -12,8 +12,8 @@ import { define } from './define.js';
 // Installed first in the function body: other islands use these constructors.
 import { isSupported as isObjectToStringSupported, install as installObjectToString } from './modules/es.object.to-string.js';
 import { isSupported as isAggregateErrorSupported, install as installAggregateError } from './modules/es.aggregate-error.js';
-import { isSupported as isMapSupported, install as installMap } from './modules/es.map.js';
-import { isSupported as isSetSupported, install as installSet } from './modules/es.set.js';
+import { install as installMap } from './modules/es.map.js';
+import { install as installSet } from './modules/es.set.js';
 import { install as installWeakMap } from './modules/es.weak-map.js';
 import { isSupported as isPromiseSupported, install as installPromise } from './modules/es.promise.js';
 import { installDisposable } from './modules/install-disposable.js';
@@ -195,8 +195,9 @@ export const installPolyfills = (): void => {
   // AggregateError, web.url parses with URLSearchParams.
   if (!isObjectToStringSupported()) installObjectToString();
   if (!isAggregateErrorSupported()) installAggregateError();
-  if (!isMapSupported()) installMap();
-  if (!isSetSupported()) installSet();
+  // Gated inside: replaces an unfit native, else patches its -0 handling.
+  installMap();
+  installSet();
   // Ungated: es.weak-map has a SUPPORTED branch too -- a native WeakMap that
   // rejects symbol keys still needs patching, and gating here would skip it.
   installWeakMap();
@@ -373,8 +374,8 @@ export const installPolyfills = (): void => {
   if (!isParseFloatSupported()) define(window, 'parseFloat', globalParseFloat);
   if (!isParseIntSupported()) define(window, 'parseInt', globalParseInt);
 
-  // Promise. Before web.immediate: promise-polyfill picks its scheduler at module-eval
-// time, and finding setImmediate there would change resolution timing.
+  // Promise's per-method islands: generic over the constructor, so they patch a
+  // kept native and spackle's Promise alike.
   if (typeof Promise !== 'undefined' && !isPromiseAllSettledSupported()) define(Promise, 'allSettled', promiseAllSettled);
   if (typeof Promise !== 'undefined' && !isPromiseAnySupported()) define(Promise, 'any', promiseAny);
   if (typeof Promise !== 'undefined' && !isPromiseFinallySupported()) define(Promise.prototype, 'finally', promiseFinally);

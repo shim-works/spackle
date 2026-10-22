@@ -99,16 +99,46 @@ const stepValue = (record: any): any => {
   }
 };
 
-// One descriptor for CreateArrayFromList, reused; cleared after each list.
+// CreateArrayFromList, once per call: a plain write unless Array.prototype holds
+// something at that index (then defineProperty, so no setter is reached).
+const ArrayProto = Array.prototype;
 const LIST: PropertyDescriptor = { value: undefined, writable: true, enumerable: true, configurable: true };
 const arrayFromList = (list: any, length: number): any[] => {
   const out: any[] = [];
   for (let i = 0; i < length; i++) {
-    LIST.value = list[i];
-    Object.defineProperty(out, i, LIST);
+    if (i in ArrayProto) {
+      LIST.value = list[i];
+      Object.defineProperty(out, i, LIST);
+      LIST.value = undefined;
+    } else {
+      out[i] = list[i];
+    }
   }
-  LIST.value = undefined;
   return out;
+};
+
+/*
+ * The two element functions for one input, sharing alreadyCalled. A factory
+ * over one per-call state record, so the walk below closes over nothing (swc
+ * would otherwise wrap every iteration in a function of its own).
+ */
+const subscribeElement = (state: any, index: number, nextPromise: any): void => {
+  let alreadyCalled = false;
+  const onFulfilled = builtinClosure(function (x: any) {
+    if (alreadyCalled) return undefined;
+    alreadyCalled = true;
+    state.values[index] = { status: 'fulfilled', value: x };
+    if (--state.remaining === 0) return state.capability.resolve(arrayFromList(state.values, state.count));
+    return undefined;
+  });
+  const onRejected = builtinClosure(function (x: any) {
+    if (alreadyCalled) return undefined;
+    alreadyCalled = true;
+    state.values[index] = { status: 'rejected', reason: x };
+    if (--state.remaining === 0) return state.capability.resolve(arrayFromList(state.values, state.count));
+    return undefined;
+  });
+  nextPromise.then(onFulfilled, onRejected);
 };
 
 export const promiseAllSettled = function allSettled(this: any, iterable: any) {
@@ -121,35 +151,18 @@ export const promiseAllSettled = function allSettled(this: any, iterable: any) {
     if (typeof promiseResolve !== 'function') throw new TypeError('Promise resolve is not callable');
     record = getIteratorRecord(iterable);
     // internal list: a null-prototype object, so no index write reaches a setter
-    const values: any = Object.create(null);
-    let count = 0;
-    let remaining = 1;
+    const state = { values: Object.create(null), count: 0, remaining: 1, capability: capability };
     for (;;) {
       const value = stepValue(record);
       if (value === DONE) {
-        if (--remaining === 0) capability.resolve(arrayFromList(values, count));
+        if (--state.remaining === 0) capability.resolve(arrayFromList(state.values, state.count));
         return capability.promise;
       }
-      const index = count++;
-      values[index] = undefined;
+      const index = state.count++;
+      state.values[index] = undefined;
       const nextPromise = promiseResolve.call(C, value);
-      let alreadyCalled = false;
-      const onFulfilled = builtinClosure(function (x: any) {
-        if (alreadyCalled) return undefined;
-        alreadyCalled = true;
-        values[index] = { status: 'fulfilled', value: x };
-        if (--remaining === 0) return capability.resolve(arrayFromList(values, count));
-        return undefined;
-      });
-      const onRejected = builtinClosure(function (x: any) {
-        if (alreadyCalled) return undefined;
-        alreadyCalled = true;
-        values[index] = { status: 'rejected', reason: x };
-        if (--remaining === 0) return capability.resolve(arrayFromList(values, count));
-        return undefined;
-      });
-      remaining++;
-      nextPromise.then(onFulfilled, onRejected);
+      state.remaining++;
+      subscribeElement(state, index, nextPromise);
     }
   } catch (error) {
     if (record !== null && !record.done && record.iterator !== null) closeIterator(record.iterator);

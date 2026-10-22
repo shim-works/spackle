@@ -3,7 +3,7 @@ import { install as installPromise } from '../src/modules/es.promise.js';
 /**
  * The scheduler behind the swapped-in Promise, rather than the Promise itself.
  *
- * es.promise hands promise-polyfill its own `_immediateFn`: a queue with one
+ * es.promise runs its jobs through window.queueMicrotask: one queue, one
  * wake-up per turn, drained to empty. That is not a detail — before it, every
  * `.then` was a separate `setTimeout`, and because a chain schedules each timer
  * from inside the previous timer's callback, the HTML nested-timer clamp made
@@ -59,53 +59,61 @@ describe('Promise scheduler — batching, order, isolation', () => {
       expect(order).toEqual([1, 2, 3]);
     }));
 
-  it('a throwing callback does not strand the callbacks queued behind it', () =>
+  it('a throwing handler rejects its own child and strands nothing queued behind it', () =>
     withPolyfill(async (P) => {
-      /*
-       * The rethrow is deliberate — it is how the failure reaches
-       * window.onerror — so it has to be swallowed here or it fails the file.
-       * Where it surfaces depends on the host: a real browser fires an `error`
-       * event on window, while under jsdom it arrives as a Node uncaught
-       * exception. This suite runs in both, so both are covered.
-       */
-      const isBoom = (error: any) => error instanceof Error && error.message === 'boom';
-      const undo: Array<() => void> = [];
-
-      const onErrorEvent = (event: any) => {
-        if (isBoom(event && event.error)) event.preventDefault();
-      };
-      window.addEventListener('error', onErrorEvent);
-      undo.push(() => window.removeEventListener('error', onErrorEvent));
-
-      const proc: any = (globalThis as any).process;
-      if (proc && typeof proc.on === 'function') {
-        const onUncaught = (error: any) => {
-          if (!isBoom(error)) throw error;
-        };
-        proc.on('uncaughtException', onUncaught);
-        undo.push(() => proc.off('uncaughtException', onUncaught));
-      }
-      const swallowDone = () => undo.forEach((fn) => fn());
-
       const ran: string[] = [];
-      try {
-        P._immediateFn(() => {
-          ran.push('a');
-          throw new Error('boom');
-        });
-        P._immediateFn(() => ran.push('b'));
-        P._immediateFn(() => ran.push('c'));
-
-        // One turn is enough: the throw goes out on a timer, so the drain
-        // carries on to b and c without needing a second wake-up.
-        await nextTurn();
-      } finally {
-        swallowDone();
-      }
-
-      // Before the fix the catch cleared the queue: ['a'].
+      let caught: any = null;
+      P.resolve().then(() => {
+        ran.push('a');
+        throw new Error('boom');
+      }).then(null, (error: any) => { caught = error; });
+      P.resolve().then(() => ran.push('b'));
+      P.resolve().then(() => ran.push('c'));
+      await nextTurn();
       expect(ran).toEqual(['a', 'b', 'c']);
+      expect(caught && caught.message).toBe('boom');
     }));
+
+  it('interleaves its jobs with queueMicrotask callbacks in one FIFO queue', () =>
+    withPolyfill(async (P) => {
+      const order: string[] = [];
+      P.resolve().then(() => order.push('p1'));
+      (window as any).queueMicrotask(() => order.push('m'));
+      P.resolve().then(() => order.push('p2'));
+      await nextTurn();
+      expect(order).toEqual(['p1', 'm', 'p2']);
+    }));
+
+  it('adopts a thenable one job later, never synchronously', () =>
+    withPolyfill(async (P) => {
+      let called = 0;
+      const thenable = { then: (resolve: any) => { called++; resolve(7); } };
+      const p = new P((resolve: any) => resolve(thenable));
+      expect(called).toBe(0);
+      let value: any;
+      p.then((v: any) => { value = v; });
+      await nextTurn();
+      expect(called).toBe(1);
+      expect(value).toBe(7);
+    }));
+
+  it('all and race over its own promises (the no-child fast path) settle as the spec path does', () =>
+    withPolyfill(async (P) => {
+      let all: any, race: any, rejected: any, mixed: any;
+      P.all([P.resolve(1), 2, new P((r: any) => setTimeout(() => r(3), 5))]).then((v: any) => { all = v; });
+      P.race([new P(() => {}), P.resolve('r')]).then((v: any) => { race = v; });
+      P.all([P.resolve(1), P.reject('x')]).then(null, (e: any) => { rejected = e; });
+      // a patched then on one element takes the spec path for that element only
+      const odd = P.resolve('o');
+      odd.then = function (this: any, f: any, r: any) { return P.prototype.then.call(this, f, r); };
+      P.all([odd, P.resolve('p')]).then((v: any) => { mixed = v; });
+      await nextTurn();
+      expect(all).toEqual([1, 2, 3]);
+      expect(race).toBe('r');
+      expect(rejected).toBe('x');
+      expect(mixed).toEqual(['o', 'p']);
+    }));
+
   it('keeps FIFO order across the 1024-slot compaction in one drain', () =>
     withPolyfill(async (P) => {
       const seen: number[] = [];

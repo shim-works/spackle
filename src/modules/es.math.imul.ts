@@ -6,7 +6,8 @@ export const isSupported = (): boolean => {
       return false;
     }
     // 0xffffffff is ToUint32(-1), so the C-style product must wrap to -5
-    return Math.imul(0xffffffff, 5) === -5;
+    // core-js's es.math.imul also forces a wrong length (Safari 7.1: 1)
+    return Math.imul(0xffffffff, 5) === -5 && Math.imul.length === 2;
   } catch {
     return false;
   }

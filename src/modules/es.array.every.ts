@@ -41,7 +41,7 @@ export const arrayEvery = function every(this: any, callbackfn: any): boolean {
   if (typeof callbackfn !== 'function') throw new TypeError('Array.prototype.every: callback is not a function');
   const thisArg = arguments.length > 1 ? arguments[1] : undefined;
   for (let k = 0; k < length; k++) {
-    if (k in O && !callbackfn.call(thisArg, O[k], k, O)) return false;
+    if (k in O && !(thisArg === undefined ? callbackfn(O[k], k, O) : callbackfn.call(thisArg, O[k], k, O))) return false;
   }
   return true;
 };

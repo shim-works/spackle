@@ -1,6 +1,11 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Promise !== 'undefined' && typeof Promise.try === 'function';
+    if (typeof Promise === 'undefined' || typeof Promise.try !== 'function') return false;
+    // core-js: the callback gets the extra arguments, and a returned promise of
+    // the same constructor comes back as is (PromiseResolve)
+    let argument: any;
+    const p = Promise.resolve();
+    return (Promise as any).try(function (a: any) { argument = a; return p; }, 8) === p && argument === 8;
   } catch {
     return false;
   }
@@ -50,7 +55,6 @@ const newPromiseCapability = (C: any): any => {
 export const promiseTry = function (this: any, callbackfn: any): any {
   const C = this;
   if (!isObject(C)) throw new TypeError('Promise.try called on a non-object');
-  const capability = newPromiseCapability(C);
   /* `arguments`, not a rest parameter: the common `Promise.try(fn)` needs no array. */
   const argCount = arguments.length;
   let value: any;
@@ -64,9 +68,13 @@ export const promiseTry = function (this: any, callbackfn: any): any {
       value = callbackfn.apply(undefined, args);
     }
   } catch (error) {
-    capability.reject(error);
-    return capability.promise;
+    const rejected = newPromiseCapability(C);
+    rejected.reject(error);
+    return rejected.promise;
   }
+  // PromiseResolve (tc39/ecma262#3883): a promise of this constructor comes back as is
+  if (isObject(value) && value.constructor === C) return value;
+  const capability = newPromiseCapability(C);
   capability.resolve(value);
   return capability.promise;
 };

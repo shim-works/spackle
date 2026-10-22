@@ -22,7 +22,34 @@ export const isSupported = (): boolean => {
       return false;
     }
 
-    return new Native('a=1').get('a') === '1';
+    if (new Native('a=1').get('a') !== '1') return false;
+
+    // core-js's url-constructor-detection, as is: core-js replaces URLSearchParams
+    // wherever it replaces URL, so spackle's URL never sits on a native one.
+    const NativeURL = (window as any).URL;
+    if (typeof NativeURL !== 'function') return true;
+    const probe = new NativeURL('b?a=1&b=2&c=3', 'https://a');
+    const params: any = probe.searchParams;
+    let result = '';
+    probe.pathname = 'c%20d';
+    params.forEach(function (value: string, key: string) {
+      params['delete']('b');
+      result += key + value;
+    });
+    const iteratorKey = typeof Symbol === 'function' ? (Symbol as any).iterator : undefined;
+    return !(
+      !params.sort ||
+      probe.href !== 'https://a/c%20d?a=1&c=3' ||
+      params.get('c') !== '3' ||
+      String(new Native('?a=1')) !== 'a=1' ||
+      (iteratorKey && !params[iteratorKey]) ||
+      new NativeURL('https://a@b').username !== 'a' ||
+      new Native(new Native('a=b')).get('a') !== 'b' ||
+      new NativeURL('https://тест').host !== 'xn--e1aybc' ||
+      new NativeURL('https://a#б').hash !== '#%D0%B1' ||
+      result !== 'a1c3' ||
+      new NativeURL('https://x', undefined).host !== 'x'
+    );
   } catch {
     return false;
   }

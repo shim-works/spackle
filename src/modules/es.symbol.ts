@@ -98,11 +98,11 @@ export const hideSymbolKeys = (): void => {
   const nativeKeys = Object.keys;
   replace(Object, 'keys', function keys(target: any): string[] {
     const keys = nativeKeys(target);
-    // inlined: withoutSymbolKeys(keys) -- keys are always strings here
+    // inlined: withoutSymbolKeys(keys) -- strings, except where an old engine hands back a number (Safari 7.1)
     let firstHit = -1;
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      if (key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) {
+      if (typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) {
         firstHit = i;
         break;
       }
@@ -112,7 +112,7 @@ export const hideSymbolKeys = (): void => {
     for (let before = 0; before < firstHit; before++) out[out.length] = keys[before];
     for (let after = firstHit + 1; after < keys.length; after++) {
       const key = keys[after];
-      if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64)) out[out.length] = key;
+      if (!(typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64)) out[out.length] = key;
     }
     return out;
   });
@@ -121,11 +121,11 @@ export const hideSymbolKeys = (): void => {
   if (typeof nativeNames === 'function') {
     replace(Object, 'getOwnPropertyNames', function getOwnPropertyNames(target: any): string[] {
       const keys = nativeNames(target);
-      // inlined: withoutSymbolKeys(keys) -- keys are always strings here
+      // inlined: withoutSymbolKeys(keys) -- strings, except where an old engine hands back a number (Safari 7.1)
       let firstHit = -1;
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        if (key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) {
+        if (typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) {
           firstHit = i;
           break;
         }
@@ -135,7 +135,7 @@ export const hideSymbolKeys = (): void => {
       for (let before = 0; before < firstHit; before++) out[out.length] = keys[before];
       for (let after = firstHit + 1; after < keys.length; after++) {
         const key = keys[after];
-        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64)) out[out.length] = key;
+        if (!(typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64)) out[out.length] = key;
       }
       return out;
     });
@@ -155,7 +155,7 @@ export const hideSymbolKeys = (): void => {
       let count = 0;
       for (let i = 0; i < names.length; i++) {
         const key = names[i]; // inlined: isPolyfilledSymbolKey(key)
-        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) && isEnumerable.call(object, key)) {
+        if (!(typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) && isEnumerable.call(object, key)) {
           listDesc.value = [key, object[key]];
           defineProperty(out, count++, listDesc);
         }
@@ -174,7 +174,7 @@ export const hideSymbolKeys = (): void => {
       let count = 0;
       for (let i = 0; i < names.length; i++) {
         const key = names[i]; // inlined: isPolyfilledSymbolKey(key)
-        if (!(key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) && isEnumerable.call(object, key)) {
+        if (!(typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) && isEnumerable.call(object, key)) {
           listDesc.value = object[key];
           defineProperty(out, count++, listDesc);
         }
@@ -235,7 +235,7 @@ export const hideSymbolKeys = (): void => {
         value,
         function (this: any, key: string, val: any): any {
           // inlined: isPolyfilledSymbolKey(key)
-          if (key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) return undefined;
+          if (typeof key === 'string' && key.charCodeAt(0) === 64 && key.charCodeAt(1) === 64) return undefined;
           return typeof replacer === 'function' ? replacer.call(this, key, val) : val;
         },
         space,

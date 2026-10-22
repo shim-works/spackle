@@ -18,12 +18,14 @@ export const isSupported = (): boolean => {
 /** Spec: https://tc39.es/ecma262/#sec-object.getownpropertynames */
 
 const nativeGetOwnPropertyNames = Object.getOwnPropertyNames;
+// ToObject, captured: the global Object can be replaced after install
+const toObject = Object;
 
 export const objectGetOwnPropertyNames = function (target: any): string[] {
   // ToObject still rejects null/undefined — Object() would box them to {}
   if (target === null || target === undefined) {
     throw new TypeError('Cannot convert undefined or null to object');
   }
-  return nativeGetOwnPropertyNames(Object(target));
+  return nativeGetOwnPropertyNames(toObject(target));
 };
 

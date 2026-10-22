@@ -1,7 +1,12 @@
 // Existence-only: Array.fromAsync is absent everywhere on the floor.
 export const isSupported = (): boolean => {
   try {
-    return typeof (Array as any).fromAsync === 'function';
+    const fromAsync = (Array as any).fromAsync;
+    if (typeof fromAsync !== 'function') return false;
+    // core-js INCORRECT_CONSTRUCTURING: an array-like is built with one construct call
+    let counter = 0;
+    fromAsync.call(function () { counter++; return []; }, { length: 0 });
+    return counter === 1;
   } catch {
     return false;
   }

@@ -1,6 +1,12 @@
 export const isSupported = (): boolean => {
   try {
     if (typeof Array.prototype.splice !== 'function') return false;
+    // @@species, decided like filter/map: a native Array[@@species] getter ships
+    // with species-aware array methods (core-js arrayMethodHasSpeciesSupport)
+    const species = typeof Symbol !== 'undefined' ? (Symbol as any).species : undefined;
+    if (!species) return false;
+    const speciesDescriptor = Object.getOwnPropertyDescriptor(Array, species);
+    if (!speciesDescriptor || typeof speciesDescriptor.get !== 'function' || (speciesDescriptor.get as any).__polyfilled === true) return false;
     // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length
     // as 1 and answers at once, where on a huge real length it would walk ~2^32
     // indices (the Chrome 38 hang / OOM)
@@ -12,12 +18,20 @@ export const isSupported = (): boolean => {
   }
 };
 
+// Safari < 13 lets a write to a read-only array length pass silently, even in
+// strict code (core-js's array-set-length). Probed once; elsewhere this is false
+// and the length write below costs nothing extra.
+const SILENT_LENGTH_SET = (function () {
+  try {
+    (Object.defineProperty([], 'length', { writable: false }) as any).length = 1;
+    return true;
+  } catch (e) {
+    return false;
+  }
+})();
+
 /**
  * Spec: https://tc39.es/ecma262/#sec-array.prototype.splice
- *
- * Known limitations:
- * - [scope] gated on ToLength only: a native that applies ToLength stays in place on engines that
- *   merely lack Symbol.species awareness.
  */
 
 // One descriptor for CreateDataPropertyOrThrow, reused by every call; value is
@@ -129,6 +143,10 @@ export const arraySplice = function (this: any, _start?: any, _deleteCount?: any
   }
   for (let i = 0; i < insertCount; i++) {
     object[actualStart + i] = arguments[i + 2];
+  }
+  // inlined: setArrayLength(object, ...) -- the TypeError Safari < 13 swallows
+  if (SILENT_LENGTH_SET && Array.isArray(object) && !(Object.getOwnPropertyDescriptor(object, 'length') as any).writable) {
+    throw new TypeError('Cannot set read only .length');
   }
   object.length = length + countDelta;
   return removed;

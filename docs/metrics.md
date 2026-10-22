@@ -20,9 +20,11 @@ maintainers once, rather than on every device at runtime.
 |---|---|
 | Design test: one Map polyfill written both ways | Self-contained version: 1.66× faster, 2.2× less garbage |
 | App workload, Chrome 41 | ~7× faster, ~7× less garbage, ~6× fewer GCs, half the heap |
+| App workload, real TV (LG 2017, webOS 3.5) | ~7× faster, ~9× less garbage, ~5× fewer GCs; same total GC time |
 | App workload on real browsers | Chrome 38 ~8× faster, Safari 7.1 ~4×, Chrome 56 ~4×, Chrome 80 level |
 | React app, real browsers | ~19% faster on Chrome 38, ~7% on Safari 7.1 |
 | React app, memory | 17–22% less heap after collection on old engines; level on modern ones |
+| React app, real TV (LG 2017, webOS 3.5) | Level: same speed, same GC |
 | Compatibility | Works on Chrome 38+ and Safari 7.1+ |
 
 The gap is largest on the oldest engines and disappears on modern ones, where
@@ -98,6 +100,24 @@ A CPU profile of the same run shows where core-js spends its time:
 | `padStart` | 0.9 s | 0.003 s |
 | `trim`, `flat` | ~0.3 s each | ~0.02 s each |
 
+**Real TV: LG 2017, webOS 3.5 (Chromium 38), natives kept, 500 passes** (3 runs each)
+
+| | core-js | spackle | |
+|---|---|---|---|
+| Time | 20.5 – 23.3 s | 2.9 – 3.3 s | ~7× faster |
+| Garbage collections | 29 – 33 | 6 – 7 | ~5× fewer |
+| Garbage created | 205 – 276 MB | 23 – 58 MB | ~9× less |
+| Total GC pause | 402 – 578 ms | 413 – 542 ms | about the same |
+| Typical pause | ~14 ms | ~75 ms | fewer, longer |
+| Peak heap | 71.5 MB | 45.0 MB | 37% lower |
+
+500 passes rather than 5000: the TV can't run more. Both libraries keep about
+21 KB alive per pass, from the workload's own WeakMap cache, which old V8 only
+clears on a full collection. spackle makes so little garbage that a collection
+comes every ~83 passes instead of every ~17, so each one has more of that cache
+to copy: the same total GC time, in fewer and longer pauses. Running one pass per
+task, as a real app does, changed nothing.
+
 **Real browsers, BrowserStack, natives kept** (one run each)
 
 | Engine | Modules spackle installed | spackle | core-js | spackle faster by |
@@ -150,6 +170,23 @@ Safari "create 1000 rows" figure is noisy (core-js's best run was 180 ms).
 In a React app, most of the garbage is React's own, so collection counts stay
 close. spackle still lowers the memory floor on old engines.
 
+**Real TV: LG 2017, webOS 3.5, natives kept**
+
+100 / 1,000 rows (the TV can't hold 10,000), 100 reps per op with the first
+discarded, enough to fill the heap many times over.
+
+| | core-js | spackle |
+|---|---|---|
+| Score, medians summed (3 runs) | 1791 / 2054 / 2106 ms | 1725 / 2146 / 2158 ms |
+| Garbage collected | 372 MB | 370 MB |
+| Young collections | 79, 2.7 s | 77, 2.5 s |
+| Full collections | 22, 3.4 s | 23, 3.3 s |
+| Total GC time | 6.1 s | 5.9 s |
+| Heap after full GCs | ~21–25 MB | ~22–25 MB |
+
+Level. On a real React app on this TV, React's own work and garbage dominate,
+and the polyfill library makes no measurable difference either way.
+
 ### Compatibility
 
 spackle's verification page, which checks each polyfilled API against its
@@ -163,7 +200,10 @@ expected behaviour, passes on Chrome 38, 44, 53, 56, 75 and 100, and Safari 7.1,
   design test above is the cleaner measure of the design itself.
 - **Noise.** Single runs vary, by ±30% or more for per-API timings. BrowserStack
   figures are one run per browser.
-- **No TV hardware yet.** Results come from the emulator and real desktop
-  browser builds, not from a TV or set-top box.
-- **Known gaps.** WeakMap can't take frozen objects as keys, and symbol keys in a
-  WeakMap are held strongly.
+- **One TV so far.** An LG 2017 (webOS 3.5); other TVs and set-top boxes are
+  untested. Its runs are shorter (500 passes, 100 / 1,000 React rows) because
+  the device can't do more.
+- **Synthetic workload.** The app workload is a simulated render loop with no
+  DOM: it measures polyfill cost per render, not whole-app speed. The React
+  test is the whole-app number.
+- **Known gaps.** WeakMap can't take frozen objects as keys.

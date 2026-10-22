@@ -71,7 +71,7 @@ export const arrayFilter = function filter(this: any, callbackfn: any): any[] {
   for (let k = 0; k < length; k++) {
     if (k in O) {
       const kValue = O[k];
-      if (callbackfn.call(thisArg, kValue, k, O)) {
+      if (thisArg === undefined ? callbackfn(kValue, k, O) : callbackfn.call(thisArg, kValue, k, O)) {
         if (plain && !(to in ArrayProto)) A[to++] = kValue;
         else {
           dataDesc.value = kValue;

@@ -2,7 +2,10 @@
 // this method onto the native constructor (never swap the whole Promise).
 export const isSupported = (): boolean => {
   try {
-    return typeof Promise !== 'undefined' && typeof Promise.prototype.finally === 'function';
+    if (typeof Promise === 'undefined' || typeof Promise.prototype.finally !== 'function') return false;
+    // core-js NON_GENERIC: finally works on any thenable this
+    (Promise.prototype.finally as any).call({ then: function () {} }, function () {});
+    return true;
   } catch {
     return false;
   }

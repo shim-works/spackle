@@ -16,12 +16,14 @@ export const isSupported = (): boolean => {
 /** Spec: https://tc39.es/ecma262/#sec-object.getprototypeof */
 
 const nativeGetPrototypeOf = Object.getPrototypeOf;
+// ToObject, captured: the global Object can be replaced after install
+const toObject = Object;
 
 export const objectGetPrototypeOf = function (target: any): any {
   // ToObject still rejects null/undefined — Object() would box them to {}
   if (target === null || target === undefined) {
     throw new TypeError('Cannot convert undefined or null to object');
   }
-  return nativeGetPrototypeOf(Object(target));
+  return nativeGetPrototypeOf(toObject(target));
 };
 

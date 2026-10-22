@@ -1,7 +1,11 @@
 // Array.prototype.find: existence-only (no half-broken native in range).
 export const isSupported = (): boolean => {
   try {
-    return typeof Array.prototype.find === 'function';
+    if (typeof Array.prototype.find !== 'function') return false;
+    // core-js's es.array.find SKIPS_HOLES: a hole must be visited (as undefined)
+    let skipsHoles = true;
+    Array(1).find(function () { skipsHoles = false; return false; });
+    return !skipsHoles;
   } catch {
     return false;
   }
@@ -21,7 +25,7 @@ export const arrayFind = function find(this: any, callbackfn: any): any {
   const thisArg = arguments.length > 1 ? arguments[1] : undefined;
   for (let k = 0; k < length; k++) {
     const kValue = O[k];
-    if (callbackfn.call(thisArg, kValue, k, O)) return kValue;
+    if (thisArg === undefined ? callbackfn(kValue, k, O) : callbackfn.call(thisArg, kValue, k, O)) return kValue;
   }
   return undefined;
 };

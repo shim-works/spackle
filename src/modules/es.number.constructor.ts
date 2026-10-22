@@ -3,7 +3,10 @@
 import { define } from '../define.js';
 export const isSupported = (): boolean => {
   try {
-    return Number('0b101') === 5 && Number('0o17') === 15;
+    if (Number('0b101') !== 5 || Number('0o17') !== 15 || Number(' 0o1') !== 1) return false;
+    // signed hex is NaN (old V8 parsed '+0x1' as 1)
+    const signedHex = Number('+0x1');
+    return signedHex !== signedHex;
   } catch {
     return false;
   }
@@ -30,7 +33,10 @@ export const NumberPolyfill = function (this: any, value?: any): any {
     if (value.indexOf('\u180E') !== -1) input = NaN;
     // inlined: parseNumericString(value) -- 0b/0o literals; anything else is native
     const trimmed = value.replace(/^\s+|\s+$/g, '');
-    if (trimmed.length > 2 && trimmed.charAt(0) === '0') {
+    const sign = trimmed.charAt(0);
+    if ((sign === '+' || sign === '-') && (trimmed.charAt(2) === 'x' || trimmed.charAt(2) === 'X') && trimmed.charAt(1) === '0') {
+      input = NaN;
+    } else if (trimmed.length > 2 && sign === '0') {
       const marker = trimmed.charAt(1);
       const digits = trimmed.substring(2);
       if (marker === 'b' || marker === 'B') {

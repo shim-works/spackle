@@ -13,6 +13,12 @@ export const isSupported = (): boolean => {
     if (!key) {
       return false;
     }
+    // @@species, decided like filter/map: a native Array[@@species] getter ships
+    // with species-aware array methods (core-js arrayMethodHasSpeciesSupport)
+    const species = typeof Symbol !== 'undefined' ? (Symbol as any).species : undefined;
+    if (!species) return false;
+    const speciesDescriptor = Object.getOwnPropertyDescriptor(Array, species);
+    if (!speciesDescriptor || typeof speciesDescriptor.get !== 'function' || (speciesDescriptor.get as any).__polyfilled === true) return false;
 
     // false blocks the spread: the array rides along whole, as one element.
     const blocked: any = [1, 2];
@@ -36,10 +42,6 @@ export const isSupported = (): boolean => {
 
 /**
  * Spec: https://tc39.es/ecma262/#sec-array.prototype.concat
- *
- * Known limitations:
- * - [scope] the gate probes @@isConcatSpreadable only. An engine that honours
- *   the flag but ignores @@species on concat (Chrome 48-50) keeps its native.
  */
 
 // One descriptor for CreateDataPropertyOrThrow, reused by every call; value is

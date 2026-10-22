@@ -140,8 +140,10 @@ const TA_NAMES = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 
 const globalObject: any = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : {});
 // the intrinsic constructors by [[TypedArrayName]]
 const intrinsicByName: any = {};
+// Safari 7.1-8's typed array constructors are callable objects: typeof 'object'.
 for (let i = 0; i < TA_NAMES.length; i++) {
-  if (typeof globalObject[TA_NAMES[i]] === 'function') intrinsicByName[TA_NAMES[i]] = globalObject[TA_NAMES[i]];
+  const C = globalObject[TA_NAMES[i]];
+  if (C !== null && (typeof C === 'function' || typeof C === 'object') && C.prototype) intrinsicByName[TA_NAMES[i]] = C;
 }
 const typedArrayProto: any =
   typeof Int8Array !== 'undefined' && Object.getPrototypeOf(Int8Array.prototype) !== Object.prototype
@@ -191,8 +193,15 @@ const toStr = (value: any): string => {
   return typeof value === 'string' ? value : String(value);
 };
 // IsConstructor, best ES5 approximation (see es.array.from for the native probe)
+// IsConstructor, plus the typed array constructors Safari 7.1-8 report as typeof 'object'.
 const isConstructor = (C: any): boolean =>
-  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
+  (typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''))) ||
+  (typeof C === 'object' && C !== null && isIntrinsicObject(C));
+// Statics only (from/of/species), so a ten-name walk is fine.
+function isIntrinsicObject(C: any): boolean {
+  for (let i = 0; i < TA_NAMES.length; i++) if (intrinsicByName[TA_NAMES[i]] === C) return true;
+  return false;
+}
 
 // TypedArrayCreateFromConstructor(C, [len]): construct, validate, check the length.
 const createFromConstructor = (C: any, length: number): any => {
@@ -773,6 +782,31 @@ export const isModernSupported = (): boolean => {
     } catch {
       return false;
     }
+    // core-js's es.typed-array.fill CONVERSION_BUG and es.typed-array.sort probes
+    // (see installTypedArrayExtensionsOnNative)
+    try {
+      let count = 0;
+      new Int8Array(2).fill({ valueOf: function () { return count++; } } as any);
+      if (count !== 1) return false;
+    } catch {
+      return false;
+    }
+    const nativeSort = (Uint16Array.prototype as any).sort;
+    let threwNull = false;
+    let threwObject = false;
+    try { nativeSort.call(new Uint16Array(2), null); } catch (e) { threwNull = true; }
+    try { nativeSort.call(new Uint16Array(2), {}); } catch (e) { threwObject = true; }
+    if (!threwNull || !threwObject) return false;
+    try {
+      const array = new Uint16Array(516);
+      for (let index = 0; index < 516; index++) array[index] = 515 - index;
+      nativeSort.call(array, function (a: number, b: number) { return ((a / 4) | 0) - ((b / 4) | 0); });
+      for (let index = 0; index < 516; index++) {
+        if (array[index] !== index - 2 * (index % 4) + 3) return false;
+      }
+    } catch {
+      return false;
+    }
     return true;
   } catch {
     return false;
@@ -937,6 +971,43 @@ const installTypedArrayExtensionsOnNative = (): void => {
       ["from", typedArrayFrom],
       ["of", typedArrayOf],
     ];
+    // core-js's es.typed-array.fill CONVERSION_BUG (V8 < Chrome 59, Safari < 14.1):
+    // the value must be converted once, before start and end.
+    const fillIsBroken = (function () {
+      if (typeof Int8Array === "undefined") return false;
+      try {
+        let count = 0;
+        new Int8Array(2).fill({ valueOf: function () { return count++; } } as any);
+        return count !== 1;
+      } catch (e) {
+        return true;
+      }
+    })();
+    // core-js's es.typed-array.sort: a comparator that is neither undefined nor
+    // callable must throw (WebKit accepts null and objects), and the sort must be
+    // stable (V8 < 7.4, WebKit < 602). core-js checks stability by engine version
+    // where it can; this runs its behavioural fallback, 516 elements, everywhere.
+    const sortIsBroken = (function () {
+      if (typeof Uint16Array === "undefined") return false;
+      const nativeSort = (Uint16Array.prototype as any).sort;
+      if (typeof nativeSort !== "function") return false;
+      let threwNull = false;
+      let threwObject = false;
+      try { nativeSort.call(new Uint16Array(2), null); } catch (e) { threwNull = true; }
+      try { nativeSort.call(new Uint16Array(2), {}); } catch (e) { threwObject = true; }
+      if (!threwNull || !threwObject) return true;
+      try {
+        const array = new Uint16Array(516);
+        for (let index = 0; index < 516; index++) array[index] = 515 - index;
+        nativeSort.call(array, function (a: number, b: number) { return ((a / 4) | 0) - ((b / 4) | 0); });
+        for (let index = 0; index < 516; index++) {
+          if (array[index] !== index - 2 * (index % 4) + 3) return true;
+        }
+        return false;
+      } catch (e) {
+        return true;
+      }
+    })();
     // set() is special: unlike everything else here it already exists, so the
     // per-name presence check would skip it. Replace it only when the behavioural
     // probe above said the native one is wrong.
@@ -1005,6 +1076,19 @@ const installTypedArrayExtensionsOnNative = (): void => {
           });
         } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
         Object.defineProperty(proto.set as any, "__polyfilled", { value: true });
+      }
+      // fill and sort exist too: replaced only where core-js's probes above fail
+      const patches: [boolean, string, Function][] = [[fillIsBroken, "fill", typedArrayFill], [sortIsBroken, "sort", typedArraySort]];
+      for (let p = 0; p < patches.length; p++) {
+        if (!patches[p][0]) continue;
+        const name = patches[p][1];
+        Object.defineProperty(proto, name, { value: patches[p][2], writable: true, enumerable: false, configurable: true });
+        try {
+          Object.defineProperty(proto[name], "name", { value: name, configurable: true });
+        } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
+        try {
+          Object.defineProperty(proto[name] as any, "__polyfilled", { value: true });
+        } catch (e) { /* already stamped: the same function on another prototype */ }
       }
       for (let s = 0; s < modernStatics.length; s++) {
         const name = modernStatics[s][0];

@@ -1,6 +1,7 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof String.prototype.toWellFormed === 'function';
+    // core-js TO_STRING_CONVERSION_BUG: a primitive this is converted to a string
+    return typeof String.prototype.toWellFormed === 'function' && (String.prototype.toWellFormed as any).call(1) === '1';
   } catch {
     return false;
   }

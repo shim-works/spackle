@@ -1,6 +1,10 @@
 export const isSupported = (): boolean => {
   try {
-    return typeof Array.prototype.findIndex === 'function';
+    if (typeof Array.prototype.findIndex !== 'function') return false;
+    // core-js's es.array.find-index SKIPS_HOLES: a hole must be visited (as undefined)
+    let skipsHoles = true;
+    Array(1).findIndex(function () { skipsHoles = false; return false; });
+    return !skipsHoles;
   } catch {
     return false;
   }
@@ -20,7 +24,7 @@ export const arrayFindIndex = function findIndex(this: any, callbackfn: any): nu
   const thisArg = arguments.length > 1 ? arguments[1] : undefined;
   for (let k = 0; k < length; k++) {
     // holes are visited too (the predicate sees undefined), unlike forEach
-    if (callbackfn.call(thisArg, O[k], k, O)) return k;
+    if (thisArg === undefined ? callbackfn(O[k], k, O) : callbackfn.call(thisArg, O[k], k, O)) return k;
   }
   return -1;
 };
