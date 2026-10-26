@@ -259,4 +259,12 @@ const installWeakMapPolyfill = (): void => {
  */
 export const install = (): void => {
   installWeakMapPolyfill();
+  // core-js setToStringTag on a kept native (Chrome 38-48, Safari 9)
+  const Native = (window as any).WeakMap;
+  const tag = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
+  if (tag && typeof Native === 'function' && Native !== WeakMap) {
+    try {
+      if (!Object.prototype.hasOwnProperty.call(Native.prototype, tag)) Object.defineProperty(Native.prototype, tag, { value: 'WeakMap', writable: false, enumerable: false, configurable: true });
+    } catch (e) { /* locked-down prototype */ }
+  }
 };

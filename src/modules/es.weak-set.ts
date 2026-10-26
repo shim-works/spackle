@@ -162,3 +162,13 @@ for (let i = 0; i < weakSetMethods.length; i++) {
 if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
   Object.defineProperty(WeakSet.prototype, (Symbol as any).toStringTag, { value: 'WeakSet', writable: false, enumerable: false, configurable: true });
 }
+
+// core-js setToStringTag on a kept native (Chrome 38-48, Safari 9)
+export const tagNativeWeakSet = (): void => {
+  const Native = (window as any).WeakSet;
+  const tag = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
+  if (!tag || typeof Native !== 'function' || Native === WeakSet) return;
+  try {
+    if (!Object.prototype.hasOwnProperty.call(Native.prototype, tag)) Object.defineProperty(Native.prototype, tag, { value: 'WeakSet', writable: false, enumerable: false, configurable: true });
+  } catch (e) { /* locked-down prototype */ }
+};

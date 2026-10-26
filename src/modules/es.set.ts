@@ -531,6 +531,28 @@ export const installSetExtensionsOnNative = (): void => {
   const Native = (window as any).Set;
   if (typeof Native !== 'function' || Native === Set) return;
   const proto = Native.prototype;
+  // core-js setToStringTag / setStrong: Chrome 38-48 and Safari 9 natives have no tag
+  const tag = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
+  if (tag) {
+    try {
+      if (!Object.prototype.hasOwnProperty.call(proto, tag)) Object.defineProperty(proto, tag, { value: 'Set', writable: false, enumerable: false, configurable: true });
+      const iterProto = Object.getPrototypeOf(new Native().values());
+      if (!Object.prototype.hasOwnProperty.call(iterProto, tag)) Object.defineProperty(iterProto, tag, { value: 'Set Iterator', writable: false, enumerable: false, configurable: true });
+    } catch (e) { /* locked-down prototype */ }
+  }
+  // core-js setSpecies; before wrapNativeConstructor, which copies it over
+  const species = typeof Symbol !== 'undefined' ? (Symbol as any).species : undefined;
+  if (species && !Object.prototype.hasOwnProperty.call(Native, species)) {
+    const speciesGetter = function (this: any) {
+      return this;
+    };
+    try {
+      Object.defineProperty(speciesGetter, 'name', { value: 'get [Symbol.species]', configurable: true });
+    } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+    try {
+      Object.defineProperty(Native, species, { get: speciesGetter, enumerable: false, configurable: true });
+    } catch (e) { /* locked-down constructor */ }
+  }
   const nativeAdder = proto.add;
   let storesNegativeZero = false;
   let lookupMissesZero = false;

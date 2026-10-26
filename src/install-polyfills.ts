@@ -28,7 +28,7 @@ import { isSupported as isMapGetOrInsertComputedSupported, mapGetOrInsertCompute
 import { isSupported as isMapGroupBySupported, mapGroupBy } from './modules/es.map.group-by.js';
 import { isSupported as isWeakMapGetOrInsertSupported, weakMapGetOrInsert } from './modules/es.weak-map.get-or-insert.js';
 import { isSupported as isWeakMapGetOrInsertComputedSupported, weakMapGetOrInsertComputed } from './modules/es.weak-map.get-or-insert-computed.js';
-import { isSupported as isWeakSetSupported, WeakSet } from './modules/es.weak-set.js';
+import { isSupported as isWeakSetSupported, WeakSet, tagNativeWeakSet } from './modules/es.weak-set.js';
 import { isSupported as isFunctionHasInstanceSupported, install as installFunctionHasInstance } from './modules/es.function.has-instance.js';
 import { isSupported as isGlobalThisSupported, install as installGlobalThis } from './modules/es.global-this.js';
 import { isSupported as isObjectAssignSupported, objectAssign } from './modules/es.object.assign.js';
@@ -222,6 +222,7 @@ export const installPolyfills = (): void => {
   if (typeof WeakMap !== 'undefined' && WeakMap.prototype && !isWeakMapGetOrInsertSupported()) define(WeakMap.prototype, 'getOrInsert', weakMapGetOrInsert);
   if (typeof WeakMap !== 'undefined' && WeakMap.prototype && !isWeakMapGetOrInsertComputedSupported()) define(WeakMap.prototype, 'getOrInsertComputed', weakMapGetOrInsertComputed);
   if (!isWeakSetSupported()) define(window, 'WeakSet', WeakSet);
+  else tagNativeWeakSet();
 
   // Object, Reflect, Function, globalThis.
   if (!isFunctionHasInstanceSupported()) installFunctionHasInstance();
