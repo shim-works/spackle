@@ -68,7 +68,7 @@ import { isSupported as isArrayFindLastIndexSupported, arrayFindLastIndex } from
 import { isSupported as isArrayFlatSupported, arrayFlat } from './modules/es.array.flat.js';
 import { isSupported as isArrayFlatMapSupported, arrayFlatMap } from './modules/es.array.flat-map.js';
 import { isSupported as isArrayForEachSupported, arrayForEach } from './modules/es.array.for-each.js';
-import { isSupported as isArrayFromSupported, arrayFrom } from './modules/es.array.from.js';
+import { isSupported as isArrayFromSupported, install as installArrayFrom } from './modules/es.array.from.js';
 import { isSupported as isArrayFromAsyncSupported, arrayFromAsync } from './modules/es.array.from-async.js';
 import { isSupported as isArrayIncludesSupported, arrayIncludes } from './modules/es.array.includes.js';
 import { isSupported as isArrayIndexOfSupported, arrayIndexOf } from './modules/es.array.index-of.js';
@@ -269,11 +269,12 @@ export const installPolyfills = (): void => {
   if (!isArrayFlatSupported()) define(Array.prototype, 'flat', arrayFlat);
   if (!isArrayFlatMapSupported()) define(Array.prototype, 'flatMap', arrayFlatMap);
   if (!isArrayForEachSupported()) define(Array.prototype, 'forEach', arrayForEach);
-  if (!isArrayFromSupported()) define(Array, 'from', arrayFrom);
   if (!isArrayFromAsyncSupported()) define(Array, 'fromAsync', arrayFromAsync);
   if (!isArrayIncludesSupported()) define(Array.prototype, 'includes', arrayIncludes);
   if (!isArrayIndexOfSupported()) define(Array.prototype, 'indexOf', arrayIndexOf);
   installArrayIterator();
+  // after the array iterator island: install() captures the @@iterator arrays end up with
+  if (!isArrayFromSupported()) installArrayFrom();
   if (!isArrayJoinSupported()) define(Array.prototype, 'join', arrayJoin);
   if (!isArrayLastIndexOfSupported()) define(Array.prototype, 'lastIndexOf', arrayLastIndexOf);
   if (!isArrayMapSupported()) define(Array.prototype, 'map', arrayMap);

@@ -70,25 +70,39 @@ const defaultCompare = (a: any, b: any): number => {
 // bottom-up merge sort: stable, one aux buffer, iterative so deep arrays
 // can't blow the stack. `<= 0` on the left keeps equal items in first-seen
 // order — the stability guarantee V8 didn't give until Chrome 70.
-// Comparator for the call in progress. Module-level instead of a per-call
-// closure; arraySort saves and restores it, so a comparator that sorts again
-// (re-entrancy) still sees its own.
-let activeCompareFn: any;
-const userCompare = (a: any, b: any): number => {
-  const numeric = +activeCompareFn(a, b); // +x, not Number(x)
+// The user's comparefn rides along as an argument -- no per-call closure, and no
+// module state to restore, so arraySort needs no try/finally and a comparator
+// that sorts again (re-entrancy) still sees its own.
+const userCompare = (a: any, b: any, comparefn: any): number => {
+  const numeric = +comparefn(a, b); // +x, not Number(x)
   return numeric === numeric ? numeric : 0;
 };
 
 /*
- * Merge sort over null-prototype lists: they are spec-internal, so no index
- * write on them may reach a setter on Array.prototype or Object.prototype.
+ * Merge sort over spec-internal lists: no index write on them may reach a setter
+ * on Array.prototype or Object.prototype. Plain arrays when nothing sits at those
+ * indices up the chain, null-prototype objects otherwise.
  */
-const stableSort = (items: any, length: number, compare: (a: any, b: any) => number): any => {
+const stableSort = (items: any, length: number, compare: (a: any, b: any, comparefn: any) => number, plain: boolean, comparefn: any): any => {
   if (length < 2) {
     return items;
   }
+  // Small lists: insertion sort in place, stable (strict > keeps equal items in
+  // order), no second buffer and no merge passes.
+  if (length <= 10) {
+    for (let i = 1; i < length; i++) {
+      const value = items[i];
+      let j = i - 1;
+      while (j >= 0 && compare(items[j], value, comparefn) > 0) {
+        items[j + 1] = items[j];
+        j--;
+      }
+      items[j + 1] = value;
+    }
+    return items;
+  }
   let source = items;
-  let target: any = Object.create(null);
+  let target: any = plain ? [] : Object.create(null);
   for (let width = 1; width < length; width *= 2) {
     for (let start = 0; start < length; start += width * 2) {
       let left = start;
@@ -97,7 +111,7 @@ const stableSort = (items: any, length: number, compare: (a: any, b: any) => num
       const end = start + width * 2 < length ? start + width * 2 : length;
       let out = start;
       while (left < middle && right < end) {
-        if (compare(source[left], source[right]) <= 0) {
+        if (compare(source[left], source[right], comparefn) <= 0) {
           target[out++] = source[left++];
         } else {
           target[out++] = source[right++];
@@ -131,7 +145,16 @@ export const arraySort = function sort(this: any, comparefn?: any): any {
   length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
   // SortIndexedProperties: read each present element exactly once. undefineds
   // sort after everything (the comparator never sees them), holes after those.
-  let items: any = Object.create(null);
+  // Plain arrays keep fast elements on old V8, a null-prototype object does not.
+  // They are only safe when no index up the prototype chain could catch a write.
+  let plain = true;
+  for (let i = 0; i < length; i++) {
+    if (i in Array.prototype) {
+      plain = false;
+      break;
+    }
+  }
+  let items: any = plain ? [] : Object.create(null);
   let itemCount = 0;
   let undefinedCount = 0;
   for (let i = 0; i < length; i++) {
@@ -144,17 +167,7 @@ export const arraySort = function sort(this: any, comparefn?: any): any {
       }
     }
   }
-  if (comparefn === undefined) {
-    items = stableSort(items, itemCount, defaultCompare);
-  } else {
-    const saved = activeCompareFn;
-    activeCompareFn = comparefn;
-    try {
-      items = stableSort(items, itemCount, userCompare);
-    } finally {
-      activeCompareFn = saved;
-    }
-  }
+  items = stableSort(items, itemCount, comparefn === undefined ? defaultCompare : userCompare, plain, comparefn);
   // write back only after sorting: values, then undefineds, then delete the rest
   let index = 0;
   for (let i = 0; i < itemCount; i++) {

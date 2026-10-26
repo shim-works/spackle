@@ -187,6 +187,29 @@ discarded, enough to fill the heap many times over.
 Level. On a real React app on this TV, React's own work and garbage dominate,
 and the polyfill library makes no measurable difference either way.
 
+### Solid JS app
+
+A real Solid JS app, legacy (`nomodule`) bundle, WebGL renderer: startup, then
+two navigation cycles, 32 key presses in all. The default build, then the same build
+plus spackle; 5 runs each, median with range. Raw logs:
+`results/solid-js-default-bench.txt` and
+`results/solid-js-default-bench-spackle.txt`.
+
+| | Default | Default + spackle | |
+|---|---|---|---|
+| Initial render | 4.53 s (1.12 – 4.66) | 1.03 s (0.94 – 1.10) | 4.4× faster |
+| Visually complete | 5.64 s (5.50 – 5.74) | 2.07 s (1.93 – 2.17) | 2.7× faster |
+| Frame rate, whole run | 34.8 fps (33.8 – 35.4) | 47.1 fps (46.0 – 48.0) | 36% higher |
+| Lowest frame rate | 1 fps (1 – 15) | 23 fps (5 – 28) | |
+| Longest frame | 3.32 s (3.28 – 3.43) | 0.13 s (0.05 – 0.20) | ~25× shorter |
+| Texture upload, total | 1249 ms | 736 ms | 41% less |
+| Frame rate, during animation | 47.8 fps | 48.2 fps | level |
+| Key press, mean | 7.0 ms | 7.2 ms | level |
+
+The gap is all in startup: the default build stalls one frame for over 3 s.
+Once the app is running, animation and input are level. One default run started
+in 1.12 s; the others all took over 4.4 s.
+
 ### Compatibility
 
 spackle's verification page, which checks each polyfilled API against its

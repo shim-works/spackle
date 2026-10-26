@@ -72,6 +72,41 @@ describe('Array.prototype.sort — test262 conformance', () => {
     });
   });
 
+  describe('fast paths', () => {
+    it('keeps equal items in order at every small length (insertion sort)', () => {
+      for (let n = 2; n <= 10; n++) {
+        const items: { k: number; tag: number }[] = [];
+        for (let i = 0; i < n; i++) items.push({ k: i % 2, tag: i });
+        arraySort.call(items, (a: any, b: any) => a.k - b.k);
+        const tags = items.map((x) => x.tag);
+        expect(tags).toEqual([...tags.filter((t) => t % 2 === 0), ...tags.filter((t) => t % 2 === 1)]);
+        expect(tags.filter((t) => t % 2 === 0)).toEqual([...tags.filter((t) => t % 2 === 0)].sort((a, b) => a - b));
+      }
+    });
+
+    it('never writes through an index on Object.prototype (null-prototype fallback)', () => {
+      let sets = 0;
+      const small = [3, 1, 2];
+      const big: number[] = [];
+      for (let i = 20; i > 0; i--) big.push(i);
+      Object.defineProperty(Object.prototype, '2', {
+        configurable: true,
+        get() { return undefined; },
+        set() { sets++; },
+      });
+      try {
+        arraySort.call(small, (a: number, b: number) => a - b);
+        arraySort.call(big, (a: number, b: number) => a - b);
+        expect(sets).toBe(0); // the real arrays own every index; only a buffer write could reach it
+        expect(small.join()).toBe('1,2,3');
+        expect(big[0]).toBe(1);
+        expect(big[19]).toBe(20);
+      } finally {
+        delete (Object.prototype as any)['2'];
+      }
+    });
+  });
+
   describe('undefined + holes', () => {
     it('sorts undefined after all values without calling the comparator on it', () => {
       let sawUndefined = false;

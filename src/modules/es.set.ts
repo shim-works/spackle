@@ -575,7 +575,9 @@ const nativeAcceptsIterables = (Native: any): boolean => {
     // subclass, never by writing to the native prototype (that would knock the
     // engine's Set methods off their fast path for the whole page)
     const R: any = typeof Reflect !== 'undefined' ? Reflect : undefined;
-    if (!R || typeof R.construct !== 'function') return true;
+    // no Reflect (Chrome 38-48): closing can't be tested, so wrap. core-js wraps
+    // here too, since its SAFE_CLOSING needs a native Array.from
+    if (!R || typeof R.construct !== 'function') return false;
     let closed = false;
     const STOP = {};
     const Sub: any = function () {};

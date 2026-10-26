@@ -1,3 +1,5 @@
+import { define } from '../define.js';
+
 // Match core-js's correctness-of-iteration gate: keep the native only if it
 // consumes a custom iterable and closes that iterator when mapping throws.
 export const isSupported = (): boolean => {
@@ -80,6 +82,68 @@ const isConstructor = (C: any): boolean => {
   return Object.prototype.hasOwnProperty.call(C, 'prototype');
 };
 
+/*
+ * The array iterator every array starts with, captured by install() once the
+ * array iterator island has run. While an array's @@iterator is that function and
+ * its iterators' next is untouched with no return, iterating it is exactly
+ * reading length and items[k] each step -- so the array path skips the iterator
+ * and its { value, done } objects. Changed after install, the protocol runs.
+ */
+let arrayValues: any;
+let arrayIteratorProto: any;
+let arrayIteratorNext: any;
+// Defines Array.from; install-polyfills calls it after the array iterator island.
+export const install = (): void => {
+  capture();
+  define(Array, 'from', arrayFrom);
+};
+export const capture = (): void => {
+  const iteratorKey = typeof Symbol !== 'undefined' && (Symbol as any).iterator ? (Symbol as any).iterator : '@@iterator';
+  const values = (ArrayProto as any)[iteratorKey];
+  if (typeof values !== 'function') return;
+  try {
+    const proto = Object.getPrototypeOf(values.call([]));
+    if (typeof proto.next !== 'function') return;
+    arrayValues = values;
+    arrayIteratorProto = proto;
+    arrayIteratorNext = proto.next;
+  } catch {
+    /* no usable iterator: every iterable takes the protocol */
+  }
+};
+
+// true while fillFromIterator is inside mapfn or the write, the steps whose throw
+// closes the iterator. Saved and restored around each run, so a nested Array.from
+// in mapfn cannot clear the outer run's flag.
+let mapping = false;
+
+// The protocol loop, with no try: Crankshaft (Chrome <= 58) won't optimise a
+// function holding one. arrayFrom catches and closes.
+const fillFromIterator = (A: any, iterator: any, next: any, mapfn: any, thisArg: any, plain: boolean): any => {
+  let k = 0;
+  while (true) {
+    mapping = false;
+    const step = next.call(iterator);
+    if (step === null || (typeof step !== 'object' && typeof step !== 'function')) {
+      throw new TypeError('Array.from: iterator result is not an object');
+    }
+    if (step.done) {
+      A.length = k;
+      return A;
+    }
+    const value = step.value;
+    mapping = true;
+    if (k >= 9007199254740991) throw new TypeError('Array.from: too many elements');
+    if (plain && !(k in ArrayProto)) A[k] = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
+    else {
+      dataDesc.value = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
+      Object.defineProperty(A, k, dataDesc);
+      dataDesc.value = undefined;
+    }
+    k++;
+  }
+};
+
 // Declared (items) for the spec length of 1; mapfn and thisArg come from arguments.
 export const arrayFrom = function from(this: any, items: any): any {
   const C: any = this;
@@ -104,35 +168,52 @@ export const arrayFrom = function from(this: any, items: any): any {
     // false when `this` is a constructor that builds the result itself
     const plain = !(C !== Array && isConstructor(C));
     const A: any = plain ? [] : new C();
+
+    // An untouched array iterator over a real array: read the indices directly.
+    // Length is re-read every step, as the iterator's next does. With no return
+    // anywhere on the iterator's chain, IteratorClose on a throw is just the throw.
+    if (
+      usingIterator === arrayValues &&
+      Array.isArray(items) &&
+      arrayIteratorProto.next === arrayIteratorNext &&
+      (arrayIteratorProto['return'] === undefined || arrayIteratorProto['return'] === null)
+    ) {
+      let k = 0;
+      while (true) {
+        // inlined: toLength(items.length)
+        let length = +items.length;
+        length = length !== length || length <= 0 ? 0 : length > 9007199254740991 ? 9007199254740991 : Math.floor(length);
+        if (k >= length) break;
+        const value = items[k];
+        if (plain && !(k in ArrayProto)) A[k] = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
+        else {
+          dataDesc.value = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
+          Object.defineProperty(A, k, dataDesc);
+          dataDesc.value = undefined;
+        }
+        k++;
+      }
+      A.length = k;
+      return A;
+    }
+
     const iterator = usingIterator.call(items);
     if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) {
       throw new TypeError('Array.from: iterator is not an object');
     }
     // GetIteratorDirect reads next once
     const next = iterator.next;
-    let k = 0;
-    while (true) {
-      const step = next.call(iterator);
-      if (step === null || (typeof step !== 'object' && typeof step !== 'function')) {
-        throw new TypeError('Array.from: iterator result is not an object');
-      }
-      if (step.done) {
-        A.length = k;
-        return A;
-      }
-      const value = step.value;
+    const saved = mapping;
+    let result: any;
+    try {
+      result = fillFromIterator(A, iterator, next, mapfn, thisArg, plain);
+    } catch (error) {
       // a throwing mapfn or a failed definition closes the iterator; errors from
       // next()/done/value propagate without closing it
-      try {
-        if (k >= 9007199254740991) throw new TypeError('Array.from: too many elements');
-        if (plain && !(k in ArrayProto)) A[k] = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
-        else {
-          dataDesc.value = mapfn !== undefined ? mapfn.call(thisArg, value, k) : value;
-          Object.defineProperty(A, k, dataDesc);
-        }
-        dataDesc.value = undefined;
-      } catch (error) {
-        dataDesc.value = undefined;
+      const closing = mapping;
+      mapping = saved;
+      dataDesc.value = undefined;
+      if (closing) {
         const ret = iterator['return'];
         if (ret !== undefined && ret !== null) {
           // a throw from return() itself must not mask the original error
@@ -142,10 +223,11 @@ export const arrayFrom = function from(this: any, items: any): any {
             /* the original error is what matters */
           }
         }
-        throw error;
       }
-      k++;
+      throw error;
     }
+    mapping = saved;
+    return result;
   }
 
   // array-like path
