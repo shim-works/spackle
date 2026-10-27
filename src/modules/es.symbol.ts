@@ -252,22 +252,29 @@ export const hideSymbolKeys = (): void => {
 const symbolProto: any = {};
 const hasOwnProp = Object.prototype.hasOwnProperty;
 const objectIsPrototypeOf = Object.prototype.isPrototypeOf;
-const isShimSymbol = (value: any): boolean =>
-  value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === symbolProto && hasOwnProp.call(value, '__name__');
-const thisSymbolValue = (value: any, method: string): any => {
-  if (!isShimSymbol(value)) throw new TypeError(method + ' requires that \'this\' be a Symbol');
-  return value;
-};
 const descriptionGetter = function (this: any): string | undefined {
-  return thisSymbolValue(this, 'Symbol.prototype.description').__description__;
+  // inlined: thisSymbolValue(this, 'Symbol.prototype.description')
+  if (this === null || typeof this !== 'object' || Object.getPrototypeOf(this) !== symbolProto || !hasOwnProp.call(this, '__name__')) {
+    throw new TypeError('Symbol.prototype.description requires that \'this\' be a Symbol');
+  }
+  return this.__description__;
 };
 const METHOD: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 METHOD.value = function toString(this: any) {
-  return thisSymbolValue(this, 'Symbol.prototype.toString').__name__;
+  // runs on every obj[symbol]: the engine coerces the key through here
+  // inlined: thisSymbolValue(this, 'Symbol.prototype.toString')
+  if (this === null || typeof this !== 'object' || Object.getPrototypeOf(this) !== symbolProto || !hasOwnProp.call(this, '__name__')) {
+    throw new TypeError('Symbol.prototype.toString requires that \'this\' be a Symbol');
+  }
+  return this.__name__;
 };
 defineProperty(symbolProto, 'toString', METHOD);
 METHOD.value = function valueOf(this: any) {
-  return thisSymbolValue(this, 'Symbol.prototype.valueOf');
+  // inlined: thisSymbolValue(this, 'Symbol.prototype.valueOf')
+  if (this === null || typeof this !== 'object' || Object.getPrototypeOf(this) !== symbolProto || !hasOwnProp.call(this, '__name__')) {
+    throw new TypeError('Symbol.prototype.valueOf requires that \'this\' be a Symbol');
+  }
+  return this;
 };
 defineProperty(symbolProto, 'valueOf', METHOD);
 METHOD.value = undefined;
@@ -282,7 +289,8 @@ export const SymbolPolyfill: any = function Symbol(this: any): any {
     throw new TypeError('Symbol is not a constructor');
   }
   const description = arguments.length > 0 ? arguments[0] : undefined;
-  if (isShimSymbol(description)) {
+  // inlined: isShimSymbol(description)
+  if (description !== null && typeof description === 'object' && Object.getPrototypeOf(description) === symbolProto && hasOwnProp.call(description, '__name__')) {
     throw new TypeError('Cannot convert a Symbol value to a string');
   }
   const symbol = Object.create(symbolProto);
@@ -304,12 +312,20 @@ export const SymbolPolyfill: any = function Symbol(this: any): any {
 // returns the property key.
 const SP: any = SymbolPolyfill.prototype;
 METHOD.value = function toString(this: any) {
-  const desc = thisSymbolValue(this, 'Symbol.prototype.toString').__description__;
+  // inlined: thisSymbolValue(this, 'Symbol.prototype.toString')
+  if (this === null || typeof this !== 'object' || Object.getPrototypeOf(this) !== symbolProto || !hasOwnProp.call(this, '__name__')) {
+    throw new TypeError('Symbol.prototype.toString requires that \'this\' be a Symbol');
+  }
+  const desc = this.__description__;
   return 'Symbol(' + (desc === undefined ? '' : desc) + ')';
 };
 defineProperty(SP, 'toString', METHOD);
 METHOD.value = function valueOf(this: any) {
-  return thisSymbolValue(this, 'Symbol.prototype.valueOf');
+  // inlined: thisSymbolValue(this, 'Symbol.prototype.valueOf')
+  if (this === null || typeof this !== 'object' || Object.getPrototypeOf(this) !== symbolProto || !hasOwnProp.call(this, '__name__')) {
+    throw new TypeError('Symbol.prototype.valueOf requires that \'this\' be a Symbol');
+  }
+  return this;
 };
 defineProperty(SP, 'valueOf', METHOD);
 METHOD.value = undefined;
@@ -346,7 +362,11 @@ for (let i = 0; i < wellKnown.length; i++) {
 
 // Symbol.prototype[@@toPrimitive] and [@@toStringTag], now that the well-knowns exist.
 const symbolToPrimitive = function (this: any, _hint: any) {
-  return thisSymbolValue(this, 'Symbol.prototype[Symbol.toPrimitive]');
+  // inlined: thisSymbolValue(this, 'Symbol.prototype[Symbol.toPrimitive]')
+  if (this === null || typeof this !== 'object' || Object.getPrototypeOf(this) !== symbolProto || !hasOwnProp.call(this, '__name__')) {
+    throw new TypeError('Symbol.prototype[Symbol.toPrimitive] requires that \'this\' be a Symbol');
+  }
+  return this;
 };
 try {
   defineProperty(symbolToPrimitive, 'name', { value: '[Symbol.toPrimitive]', configurable: true });
@@ -357,7 +377,8 @@ defineProperty(SP, (SymbolPolyfill as any).toStringTag, { value: 'Symbol', writa
 // Global registry: Symbol.for interns by key; Symbol.keyFor reverses it.
 const registry: any = Object.create(null);
 METHOD.value = function (key: any) {
-  if (isShimSymbol(key)) throw new TypeError('Cannot convert a Symbol value to a string');
+  // inlined: isShimSymbol(key)
+  if (key !== null && typeof key === 'object' && Object.getPrototypeOf(key) === symbolProto && hasOwnProp.call(key, '__name__')) throw new TypeError('Cannot convert a Symbol value to a string');
   const k = String(key);
   const existing = registry[k];
   if (existing) {
@@ -374,7 +395,8 @@ METHOD.value = function (key: any) {
 try { defineProperty(METHOD.value, 'name', { value: 'for', configurable: true }); } catch (e) { /* pre-ES6 */ }
 defineProperty(SymbolPolyfill, 'for', METHOD);
 METHOD.value = function keyFor(symbol: any) {
-  if (!isShimSymbol(symbol)) throw new TypeError(String(symbol) + ' is not a symbol');
+  // inlined: isShimSymbol(symbol)
+  if (symbol === null || typeof symbol !== 'object' || Object.getPrototypeOf(symbol) !== symbolProto || !hasOwnProp.call(symbol, '__name__')) throw new TypeError(String(symbol) + ' is not a symbol');
   return hasOwnProp.call(symbol, '__registryKey__') ? symbol.__registryKey__ : undefined;
 };
 defineProperty(SymbolPolyfill, 'keyFor', METHOD);

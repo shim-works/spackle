@@ -10,17 +10,13 @@ export const isSupported = (): boolean => {
  * Spec: https://tc39.es/ecma262/#sec-string.prototype.codepointat
  * Inspired by: MDN (surrogate-pair combination)
  */
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 export const stringCodePointAt = function (this: any, pos: number): number | undefined {
   if (this === null || this === undefined) {
     throw new TypeError('String.prototype.codePointAt called on null or undefined');
   }
-  const source = toStr(this);
+  // inlined: toStr(this) -- String(symbol) returns "Symbol(...)"; the spec throws
+  if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const source = typeof this === 'string' ? this : String(this);
   const length = source.length;
   let index = +pos; // +x, not Number(x): same coercion, no call
   if (index !== index) {

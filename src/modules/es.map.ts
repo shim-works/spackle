@@ -431,7 +431,14 @@ Map.prototype.delete = function (this: any, key: any): boolean {
   this._keys[i] = HOLE;
   this._vals[i] = undefined; // a dead slot pins nothing
   const holes = this._holes + 1;
-  own(this, '_holes', holes);
+  // inlined: own(this, '_holes', holes) -- an own field after the first delete
+  if (hasOwnSlot.call(this, '_holes')) {
+    this._holes = holes;
+  } else {
+    SLOT.value = holes;
+    Object.defineProperty(this, '_holes', SLOT);
+    SLOT.value = undefined;
+  }
   const live = this._keys.length - holes;
   if (live === 0 || (holes > 16 && holes > live)) compact(this);
   return true;

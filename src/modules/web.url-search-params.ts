@@ -222,16 +222,6 @@ const toUSVString = (value: any): string => {
   return out === null ? str : out;
 };
 
-const requireParams = (self: any, method: string): void => {
-  if (self === null || typeof self !== 'object' || !hasOwn.call(self, '_pairs')) {
-    throw new TypeError("Failed to execute '" + method + "' on 'URLSearchParams': Illegal invocation");
-  }
-};
-const requireArgs = (count: number, needed: number, method: string): void => {
-  if (count < needed) {
-    throw new TypeError("Failed to execute '" + method + "' on 'URLSearchParams': " + needed + ' argument' + (needed > 1 ? 's' : '') + ' required, but only ' + count + ' present.');
-  }
-};
 
 // WebIDL sequence<USVString> for one init entry: the inner value's own
 // iterator (arrays included), exactly two items.
@@ -326,15 +316,27 @@ export const URLSearchParams = function (this: any) {
 const P: any = URLSearchParams.prototype;
 
 P.append = function append(this: any, name: any, value: any): void {
-  requireParams(this, 'append');
-  requireArgs(arguments.length, 2, 'append');
+  // inlined: requireParams(this, 'append')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'append' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 2, 'append')
+  if (arguments.length < 2) {
+    throw new TypeError("Failed to execute 'append' on 'URLSearchParams': 2 arguments required, but only " + arguments.length + ' present.');
+  }
   this._pairs.push([toUSVString(name), toUSVString(value)]);
   updateSteps(this);
 };
 
 P['delete'] = function (this: any, name: any): void {
-  requireParams(this, 'delete');
-  requireArgs(arguments.length, 1, 'delete');
+  // inlined: requireParams(this, 'delete')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'delete' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 1, 'delete')
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'delete' on 'URLSearchParams': 1 argument required, but only " + arguments.length + ' present.');
+  }
   const key = toUSVString(name);
   const value = arguments.length > 1 && arguments[1] !== undefined ? toUSVString(arguments[1]) : undefined;
   const kept: [string, string][] = [];
@@ -349,8 +351,14 @@ P['delete'] = function (this: any, name: any): void {
 };
 
 P.get = function get(this: any, name: any): string | null {
-  requireParams(this, 'get');
-  requireArgs(arguments.length, 1, 'get');
+  // inlined: requireParams(this, 'get')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'get' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 1, 'get')
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'get' on 'URLSearchParams': 1 argument required, but only " + arguments.length + ' present.');
+  }
   const key = toUSVString(name);
   for (let i = 0; i < this._pairs.length; i++) {
     if (this._pairs[i][0] === key) return this._pairs[i][1];
@@ -359,8 +367,14 @@ P.get = function get(this: any, name: any): string | null {
 };
 
 P.getAll = function getAll(this: any, name: any): string[] {
-  requireParams(this, 'getAll');
-  requireArgs(arguments.length, 1, 'getAll');
+  // inlined: requireParams(this, 'getAll')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'getAll' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 1, 'getAll')
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'getAll' on 'URLSearchParams': 1 argument required, but only " + arguments.length + ' present.');
+  }
   const key = toUSVString(name);
   const values: string[] = [];
   for (let i = 0; i < this._pairs.length; i++) {
@@ -370,8 +384,14 @@ P.getAll = function getAll(this: any, name: any): string[] {
 };
 
 P.has = function has(this: any, name: any): boolean {
-  requireParams(this, 'has');
-  requireArgs(arguments.length, 1, 'has');
+  // inlined: requireParams(this, 'has')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'has' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 1, 'has')
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'has' on 'URLSearchParams': 1 argument required, but only " + arguments.length + ' present.');
+  }
   const key = toUSVString(name);
   const value = arguments.length > 1 && arguments[1] !== undefined ? toUSVString(arguments[1]) : undefined;
   for (let i = 0; i < this._pairs.length; i++) {
@@ -381,8 +401,14 @@ P.has = function has(this: any, name: any): boolean {
 };
 
 P.set = function set(this: any, name: any, value: any): void {
-  requireParams(this, 'set');
-  requireArgs(arguments.length, 2, 'set');
+  // inlined: requireParams(this, 'set')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'set' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 2, 'set')
+  if (arguments.length < 2) {
+    throw new TypeError("Failed to execute 'set' on 'URLSearchParams': 2 arguments required, but only " + arguments.length + ' present.');
+  }
   const key = toUSVString(name);
   const next = toUSVString(value);
   let replaced = false;
@@ -404,7 +430,10 @@ P.set = function set(this: any, name: any, value: any): void {
 
 // Stable sort by name, comparing UTF-16 code units (the spec's order).
 P.sort = function sort(this: any): void {
-  requireParams(this, 'sort');
+  // inlined: requireParams(this, 'sort')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'sort' on 'URLSearchParams': Illegal invocation");
+  }
   const list = this._pairs;
   for (let i = 1; i < list.length; i++) {
     const pair = list[i];
@@ -458,14 +487,23 @@ Object.defineProperty(P, 'toString', {
   enumerable: true,
   configurable: true,
   value: function toString(this: any): string {
-    requireParams(this, 'toString');
+    // inlined: requireParams(this, 'toString')
+    if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+      throw new TypeError("Failed to execute 'toString' on 'URLSearchParams': Illegal invocation");
+    }
     return serializePairs(this._pairs);
   },
 });
 
 P.forEach = function forEach(this: any, callback: any): void {
-  requireParams(this, 'forEach');
-  requireArgs(arguments.length, 1, 'forEach');
+  // inlined: requireParams(this, 'forEach')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'forEach' on 'URLSearchParams': Illegal invocation");
+  }
+  // inlined: requireArgs(arguments.length, 1, 'forEach')
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'forEach' on 'URLSearchParams': 1 argument required, but only " + arguments.length + ' present.');
+  }
   if (typeof callback !== 'function') {
     throw new TypeError("Failed to execute 'forEach' on 'URLSearchParams': The callback provided as parameter 1 is not a function.");
   }
@@ -481,7 +519,10 @@ Object.defineProperty(P, 'size', {
   enumerable: true,
   configurable: true,
   get: function (this: any): number {
-    requireParams(this, 'size');
+    // inlined: requireParams(this, 'size')
+    if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+      throw new TypeError("Failed to execute 'size' on 'URLSearchParams': Illegal invocation");
+    }
     return this._pairs.length;
   },
 });
@@ -546,15 +587,24 @@ const makeIterator = (params: any, kind: number): any => {
 };
 
 P.keys = function keys(this: any): any {
-  requireParams(this, 'keys');
+  // inlined: requireParams(this, 'keys')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'keys' on 'URLSearchParams': Illegal invocation");
+  }
   return makeIterator(this, 0);
 };
 P.values = function values(this: any): any {
-  requireParams(this, 'values');
+  // inlined: requireParams(this, 'values')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'values' on 'URLSearchParams': Illegal invocation");
+  }
   return makeIterator(this, 1);
 };
 P.entries = function entries(this: any): any {
-  requireParams(this, 'entries');
+  // inlined: requireParams(this, 'entries')
+  if (this === null || typeof this !== 'object' || !hasOwn.call(this, '_pairs')) {
+    throw new TypeError("Failed to execute 'entries' on 'URLSearchParams': Illegal invocation");
+  }
   return makeIterator(this, 2);
 };
 // spec names (the bundler may rename function expressions; delete is anonymous)
@@ -572,7 +622,44 @@ if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
   Object.defineProperty(P, (Symbol as any).toStringTag, { value: 'URLSearchParams', writable: false, enumerable: false, configurable: true });
 }
 
+/*
+ * core-js's wrapRequestOptions. Native fetch / Request only know the engine's
+ * URLSearchParams, so ours would go out as text/plain and form endpoints answer
+ * with an empty body. Hand them the string and the form Content-Type instead;
+ * a Content-Type the app set wins. Other inits pass through untouched.
+ */
+const wrapRequestInit = (init: any): any => {
+  if (init === null || typeof init !== 'object') return init;
+  const body = init.body;
+  if (!(body instanceof (URLSearchParams as any)) || !hasOwn.call(body, '_pairs')) return init;
+  const headers = init.headers ? new (window as any).Headers(init.headers) : new (window as any).Headers();
+  if (!headers.has('content-type')) headers.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8');
+  return Object.create(init, { body: { value: body.toString() }, headers: { value: headers } });
+};
+
 // Self-installs on import: other islands capture this constructor at module scope.
 export const install = (): void => {
-  define(window, 'URLSearchParams', URLSearchParams);
+  const w: any = window;
+  define(w, 'URLSearchParams', URLSearchParams);
+  // Only once ours is live, and only where native fetch can take a Headers.
+  if (w.URLSearchParams !== URLSearchParams || typeof w.Headers !== 'function') return;
+  const nativeFetch = w.fetch;
+  if (typeof nativeFetch === 'function' && !nativeFetch.__polyfilled) {
+    define(w, 'fetch', function fetch(input: any): any {
+      return arguments.length > 1 ? nativeFetch.call(w, input, wrapRequestInit(arguments[1])) : nativeFetch.call(w, input);
+    });
+  }
+  const NativeRequest = w.Request;
+  if (typeof NativeRequest === 'function' && !NativeRequest.__polyfilled) {
+    const Request = function Request(this: any, input: any): any {
+      if (!(this instanceof Request)) {
+        throw new TypeError("Failed to construct 'Request': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+      }
+      return arguments.length > 1 ? new NativeRequest(input, wrapRequestInit(arguments[1])) : new NativeRequest(input);
+    };
+    // Natives stay instances of the wrapper: one shared prototype.
+    Request.prototype = NativeRequest.prototype;
+    define(NativeRequest.prototype, 'constructor', Request, 'Request');
+    define(w, 'Request', Request);
+  }
 };

@@ -54,36 +54,21 @@ export const isArraySortSupported = isSupported;
 
 /** Spec: https://tc39.es/ecma262/#sec-array.prototype.sort */
 
-// spec default SortCompare: compare the ToString of both values
-const defaultCompare = (a: any, b: any): number => {
-  const left = String(a);
-  const right = String(b);
-  if (left < right) {
-    return -1;
-  }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
-};
-
 // bottom-up merge sort: stable, one aux buffer, iterative so deep arrays
 // can't blow the stack. `<= 0` on the left keeps equal items in first-seen
 // order — the stability guarantee V8 didn't give until Chrome 70.
 // The user's comparefn rides along as an argument -- no per-call closure, and no
 // module state to restore, so arraySort needs no try/finally and a comparator
-// that sorts again (re-entrancy) still sees its own.
-const userCompare = (a: any, b: any, comparefn: any): number => {
-  const numeric = +comparefn(a, b); // +x, not Number(x)
-  return numeric === numeric ? numeric : 0;
-};
+// that sorts again (re-entrancy) still sees its own. Both comparisons are
+// inlined: through a function pointer, the call site saw two targets and the
+// engine could not inline either.
 
 /*
  * Merge sort over spec-internal lists: no index write on them may reach a setter
  * on Array.prototype or Object.prototype. Plain arrays when nothing sits at those
  * indices up the chain, null-prototype objects otherwise.
  */
-const stableSort = (items: any, length: number, compare: (a: any, b: any, comparefn: any) => number, plain: boolean, comparefn: any): any => {
+const stableSort = (items: any, length: number, plain: boolean, comparefn: any): any => {
   if (length < 2) {
     return items;
   }
@@ -93,8 +78,21 @@ const stableSort = (items: any, length: number, compare: (a: any, b: any, compar
     for (let i = 1; i < length; i++) {
       const value = items[i];
       let j = i - 1;
-      while (j >= 0 && compare(items[j], value, comparefn) > 0) {
-        items[j + 1] = items[j];
+      while (j >= 0) {
+        const a = items[j];
+        let order: number;
+        if (comparefn !== undefined) {
+          // inlined: userCompare(a, value, comparefn)
+          order = +comparefn(a, value); // +x, not Number(x)
+          if (order !== order) order = 0;
+        } else {
+          // inlined: defaultCompare(a, value) -- the ToString of both values
+          const left = String(a);
+          const right = String(value);
+          order = left < right ? -1 : left > right ? 1 : 0;
+        }
+        if (order <= 0) break;
+        items[j + 1] = a;
         j--;
       }
       items[j + 1] = value;
@@ -111,7 +109,20 @@ const stableSort = (items: any, length: number, compare: (a: any, b: any, compar
       const end = start + width * 2 < length ? start + width * 2 : length;
       let out = start;
       while (left < middle && right < end) {
-        if (compare(source[left], source[right], comparefn) <= 0) {
+        const a = source[left];
+        const b = source[right];
+        let order: number;
+        if (comparefn !== undefined) {
+          // inlined: userCompare(a, b, comparefn)
+          order = +comparefn(a, b); // +x, not Number(x)
+          if (order !== order) order = 0;
+        } else {
+          // inlined: defaultCompare(a, b) -- the ToString of both values
+          const sa = String(a);
+          const sb = String(b);
+          order = sa < sb ? -1 : sa > sb ? 1 : 0;
+        }
+        if (order <= 0) {
           target[out++] = source[left++];
         } else {
           target[out++] = source[right++];
@@ -167,7 +178,7 @@ export const arraySort = function sort(this: any, comparefn?: any): any {
       }
     }
   }
-  items = stableSort(items, itemCount, comparefn === undefined ? defaultCompare : userCompare, plain, comparefn);
+  items = stableSort(items, itemCount, plain, comparefn);
   // write back only after sorting: values, then undefineds, then delete the rest
   let index = 0;
   for (let i = 0; i < itemCount; i++) {

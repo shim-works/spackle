@@ -24,12 +24,6 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.includes */
 // IsRegExp: @@match decides when present, else the RegExp brand (not instanceof).
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 const objectToString = Object.prototype.toString;
 
 // Declared (searchString) for the spec length of 1; the position comes from arguments.
@@ -39,7 +33,9 @@ export const stringIncludes = function includes(this: any, search: any): boolean
   if (this === null || this === undefined) {
     throw new TypeError('String.prototype.includes called on null or undefined');
   }
-  const s = toStr(this);
+  // inlined: toStr(this) -- String(symbol) returns "Symbol(...)"; the spec throws
+  if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const s = typeof this === 'string' ? this : String(this);
   // the spec explicitly rejects a regex here — includes is for plain strings
   // inlined: isRegExp(search) -- primitives skip straight past
   let isRegExpValue = false;
@@ -53,6 +49,8 @@ export const stringIncludes = function includes(this: any, search: any): boolean
       'First argument to String.prototype.includes must not be a regular expression',
     );
   }
-  return s.indexOf(toStr(search), start) !== -1;
+  // inlined: toStr(search)
+  if (typeof search === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return s.indexOf(typeof search === 'string' ? search : String(search), start) !== -1;
 };
 

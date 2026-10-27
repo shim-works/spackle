@@ -18,12 +18,6 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.replace */
 
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 const nativeReplace = String.prototype.replace;
 
 const objectToString = Object.prototype.toString;
@@ -49,8 +43,13 @@ export const stringReplace = function replace(this: any, searchValue: any, repla
   }
   // The string search, converted in the spec's order: the receiver, the search
   // string, then a non-function replaceValue, even when nothing will match.
-  const string = toStr(this);
-  const searchString = toStr(searchValue);
-  return (nativeReplace as any).call(string, searchString, typeof replaceValue === 'function' ? replaceValue : toStr(replaceValue));
+  // inlined: toStr(this), toStr(searchValue), toStr(replaceValue) -- String(symbol)
+  // returns "Symbol(...)"; the spec throws
+  if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const string = typeof this === 'string' ? this : String(this);
+  if (typeof searchValue === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const searchString = typeof searchValue === 'string' ? searchValue : String(searchValue);
+  if (typeof replaceValue === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return (nativeReplace as any).call(string, searchString, typeof replaceValue === 'function' || typeof replaceValue === 'string' ? replaceValue : String(replaceValue));
 };
 

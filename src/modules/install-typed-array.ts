@@ -140,10 +140,16 @@ const TA_NAMES = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 
 const globalObject: any = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : {});
 // the intrinsic constructors by [[TypedArrayName]]
 const intrinsicByName: any = {};
+// [[TypedArrayName]] by class string, for ES5 engines: one lookup, where
+// slicing the tag apart cost two new strings per validate().
+const nameByTag: any = Object.create(null);
 // Safari 7.1-8's typed array constructors are callable objects: typeof 'object'.
 for (let i = 0; i < TA_NAMES.length; i++) {
   const C = globalObject[TA_NAMES[i]];
-  if (C !== null && (typeof C === 'function' || typeof C === 'object') && C.prototype) intrinsicByName[TA_NAMES[i]] = C;
+  if (C !== null && (typeof C === 'function' || typeof C === 'object') && C.prototype) {
+    intrinsicByName[TA_NAMES[i]] = C;
+    nameByTag['[object ' + TA_NAMES[i] + ']'] = TA_NAMES[i];
+  }
 }
 const typedArrayProto: any =
   typeof Int8Array !== 'undefined' && Object.getPrototypeOf(Int8Array.prototype) !== Object.prototype
@@ -160,37 +166,38 @@ const typedArrayName = (O: any): string | undefined => {
   if (!isObject(O)) return undefined;
   if (nativeTagGetter) return nativeTagGetter.call(O);
   // ES5 engines: typed arrays are host objects with a class string
-  const tag = objectToString.call(O);
-  const name = tag.slice(8, -1);
-  return intrinsicByName[name] !== undefined && tag === '[object ' + name + ']' ? name : undefined;
+  return nameByTag[objectToString.call(O)];
 };
 const lengthOf = (O: any): number => (nativeLengthGetter ? nativeLengthGetter.call(O) : O.length);
 const bufferOf = (O: any): any => (nativeBufferGetter ? nativeBufferGetter.call(O) : O.buffer);
 const isDetached = (O: any): boolean => !!(detachedGetter && detachedGetter.call(bufferOf(O)));
 
 // ValidateTypedArray: a typed array whose buffer is not detached; returns its length.
+// Every method enters through here, so its helpers are inlined: one call, not six.
 const validate = (O: any, method: string): number => {
-  if (typedArrayName(O) === undefined) {
+  // inlined: typedArrayName(O), isObject(O)
+  const name =
+    O === null || (typeof O !== 'object' && typeof O !== 'function')
+      ? undefined
+      : nativeTagGetter
+        ? nativeTagGetter.call(O)
+        : nameByTag[objectToString.call(O)];
+  if (name === undefined) {
     throw new TypeError('%TypedArray%.prototype.' + method + ': this is not a typed array');
   }
-  if (isDetached(O)) {
+  // inlined: isDetached(O), bufferOf(O)
+  if (detachedGetter && detachedGetter.call(nativeBufferGetter ? nativeBufferGetter.call(O) : O.buffer)) {
     throw new TypeError('%TypedArray%.prototype.' + method + ': the buffer is detached');
   }
-  return lengthOf(O);
+  // inlined: lengthOf(O)
+  return nativeLengthGetter ? nativeLengthGetter.call(O) : O.length;
 };
 
-const toIntegerOrInfinity = (value: any): number => {
-  const n = +value; // +x, not Number(x)
-  return n !== n ? 0 : n === Infinity || n === -Infinity ? n : n < 0 ? Math.ceil(n) : Math.floor(n);
-};
 const relativeIndex = (value: any, len: number): number => {
-  const rel = toIntegerOrInfinity(value);
+  // inlined: toIntegerOrInfinity(value)
+  let rel = +value; // +x, not Number(x)
+  rel = rel !== rel ? 0 : rel === Infinity || rel === -Infinity ? rel : rel < 0 ? Math.ceil(rel) : Math.floor(rel);
   return rel < 0 ? Math.max(len + rel, 0) : Math.min(rel, len);
-};
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
 };
 // IsConstructor, best ES5 approximation (see es.array.from for the native probe)
 // IsConstructor, plus the typed array constructors Safari 7.1-8 report as typeof 'object'.
@@ -314,7 +321,9 @@ export const typedArrayIncludes = function includes(this: any, searchElement: an
   const len = validate(this, 'includes');
   // an empty array answers false before fromIndex is converted
   if (len === 0) return false;
-  let n = toIntegerOrInfinity(arguments.length > 1 ? arguments[1] : undefined);
+  // inlined: toIntegerOrInfinity((arguments.length > 1 ? arguments[1] : undefined))
+  let n = +(arguments.length > 1 ? arguments[1] : undefined); // +x, not Number(x)
+  n = n !== n ? 0 : n === Infinity || n === -Infinity ? n : n < 0 ? Math.ceil(n) : Math.floor(n);
   if (n === Infinity) return false;
   if (n === -Infinity) n = 0;
   for (let k = n >= 0 ? n : Math.max(len + n, 0); k < len; k++) {
@@ -326,7 +335,9 @@ export const typedArrayIncludes = function includes(this: any, searchElement: an
 
 export const typedArrayAt = function at(this: any, index: any) {
   const len = validate(this, 'at');
-  const rel = toIntegerOrInfinity(index);
+  // inlined: toIntegerOrInfinity(index)
+  let rel = +index; // +x, not Number(x)
+  rel = rel !== rel ? 0 : rel === Infinity || rel === -Infinity ? rel : rel < 0 ? Math.ceil(rel) : Math.floor(rel);
   const k = rel >= 0 ? rel : len + rel;
   if (k < 0 || k >= len) return undefined;
   return this[k];
@@ -392,7 +403,9 @@ export const typedArrayFilter = function filter(this: any, callbackfn: any) {
 export const typedArrayIndexOf = function indexOf(this: any, searchElement: any) {
   const len = validate(this, 'indexOf');
   if (len === 0) return -1;
-  let n = toIntegerOrInfinity(arguments.length > 1 ? arguments[1] : undefined);
+  // inlined: toIntegerOrInfinity((arguments.length > 1 ? arguments[1] : undefined))
+  let n = +(arguments.length > 1 ? arguments[1] : undefined); // +x, not Number(x)
+  n = n !== n ? 0 : n === Infinity || n === -Infinity ? n : n < 0 ? Math.ceil(n) : Math.floor(n);
   if (n === Infinity) return -1;
   if (n === -Infinity) n = 0;
   for (let k = n >= 0 ? n : Math.max(len + n, 0); k < len; k++) {
@@ -405,7 +418,12 @@ export const typedArrayIndexOf = function indexOf(this: any, searchElement: any)
 export const typedArrayLastIndexOf = function lastIndexOf(this: any, searchElement: any) {
   const len = validate(this, 'lastIndexOf');
   if (len === 0) return -1;
-  const n = arguments.length > 1 ? toIntegerOrInfinity(arguments[1]) : len - 1;
+  let n = len - 1;
+  if (arguments.length > 1) {
+    // inlined: toIntegerOrInfinity(arguments[1])
+    n = +arguments[1]; // +x, not Number(x)
+    n = n !== n ? 0 : n === Infinity || n === -Infinity ? n : n < 0 ? Math.ceil(n) : Math.floor(n);
+  }
   if (n === -Infinity) return -1;
   for (let k = n >= 0 ? Math.min(n, len - 1) : len + n; k >= 0; k--) {
     if (k in this && this[k] === searchElement) return k + 0;
@@ -415,12 +433,18 @@ export const typedArrayLastIndexOf = function lastIndexOf(this: any, searchEleme
 
 export const typedArrayJoin = function join(this: any, separator?: any) {
   const len = validate(this, 'join');
-  const sep = separator === undefined ? ',' : toStr(separator);
+  // inlined: toStr(separator), toStr(element) -- String(symbol) returns
+  // "Symbol(...)"; the spec throws
+  if (typeof separator === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const sep = separator === undefined ? ',' : typeof separator === 'string' ? separator : String(separator);
   let out = '';
   for (let k = 0; k < len; k++) {
     if (k > 0) out += sep;
     const element = this[k];
-    if (element !== undefined) out += toStr(element);
+    if (element !== undefined) {
+      if (typeof element === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      out += typeof element === 'string' ? element : String(element);
+    }
   }
   return out;
 };
@@ -435,7 +459,12 @@ export const typedArrayToLocaleString = function toLocaleString(this: any) {
   for (let k = 0; k < len; k++) {
     if (k > 0) out += ',';
     const element = this[k];
-    if (element !== undefined && element !== null) out += toStr(element.toLocaleString());
+    if (element !== undefined && element !== null) {
+      // inlined: toStr(element.toLocaleString())
+      const local = element.toLocaleString();
+      if (typeof local === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      out += typeof local === 'string' ? local : String(local);
+    }
   }
   return out;
 };
@@ -854,7 +883,9 @@ export const typedArrayToSorted = function toSorted(this: any, comparefn?: any) 
 
 export const typedArrayWith = function (this: any, index: any, value: any) {
   const len = validate(this, 'with');
-  const rel = toIntegerOrInfinity(index);
+  // inlined: toIntegerOrInfinity(index)
+  let rel = +index; // +x, not Number(x)
+  rel = rel !== rel ? 0 : rel === Infinity || rel === -Infinity ? rel : rel < 0 ? Math.ceil(rel) : Math.floor(rel);
   const actual = rel >= 0 ? rel : len + rel;
   // the value is converted before the index is range-checked
   const numericValue = +value;
@@ -871,7 +902,9 @@ export const typedArraySet = function (this: any, source: any) {
   if (typedArrayName(this) === undefined) {
     throw new TypeError('%TypedArray%.prototype.set: this is not a typed array');
   }
-  const targetOffset = toIntegerOrInfinity(arguments.length > 1 ? arguments[1] : undefined);
+  // inlined: toIntegerOrInfinity((arguments.length > 1 ? arguments[1] : undefined))
+  let targetOffset = +(arguments.length > 1 ? arguments[1] : undefined); // +x, not Number(x)
+  targetOffset = targetOffset !== targetOffset ? 0 : targetOffset === Infinity || targetOffset === -Infinity ? targetOffset : targetOffset < 0 ? Math.ceil(targetOffset) : Math.floor(targetOffset);
   if (targetOffset < 0) throw new RangeError('offset is out of bounds');
   if (isDetached(this)) throw new TypeError('%TypedArray%.prototype.set: the buffer is detached');
   const targetLength = lengthOf(this);

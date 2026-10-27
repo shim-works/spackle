@@ -7,17 +7,13 @@ export const isSupported = (): boolean => {
 };
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.repeat */
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 export const stringRepeat = function (this: any, count: number): string {
   if (this === null || this === undefined) {
     throw new TypeError('String.prototype.repeat called on null or undefined');
   }
-  const source = toStr(this);
+  // inlined: toStr(this) -- String(symbol) returns "Symbol(...)"; the spec throws
+  if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const source = typeof this === 'string' ? this : String(this);
   // ToIntegerOrInfinity FIRST, then the range check: -0.5 truncates to -0,
   // which is not < 0, so repeat(-0.5) is '' -- checking before truncating
   // threw a RangeError for every count in (-1, 0).

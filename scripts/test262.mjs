@@ -97,6 +97,21 @@ const FEATURES = {
     dir: 'test/built-ins/Math/sumPrecise',
     strip: `delete Math.sumPrecise;`,
   },
+  reflect: {
+    modules: ['install-reflect.ts'],
+    dir: 'test/built-ins/Reflect',
+    strip: `delete globalThis.Reflect;`,
+  },
+  'map-groupby': {
+    modules: ['es.map.group-by.ts'],
+    dir: 'test/built-ins/Map/groupBy',
+    strip: `delete Map.groupBy;`,
+  },
+  'object-groupby': {
+    modules: ['es.object.group-by.ts'],
+    dir: 'test/built-ins/Object/groupBy',
+    strip: `delete Object.groupBy;`,
+  },
 };
 
 const args = process.argv.slice(2);

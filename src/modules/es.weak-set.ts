@@ -29,22 +29,11 @@ const iteratorKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).iterato
 const arrayIterAtLoad: any = iteratorKey ? (Array.prototype as any)[iteratorKey] : undefined;
 let counter = 0;
 
-const isObject = (value: any): boolean =>
-  value !== null && (typeof value === 'object' || typeof value === 'function');
 const isRegisteredSymbol = (value: any): boolean => {
   try {
     return (Symbol as any).keyFor(value) !== undefined;
   } catch (e) {
     return false;
-  }
-};
-// CanBeHeldWeakly: an object, or a symbol that is not in the global registry.
-const canBeHeldWeakly = (value: any): boolean =>
-  isObject(value) || (typeof value === 'symbol' && !isRegisteredSymbol(value));
-
-const requireWeakSet = (self: any, method: string): void => {
-  if (self === null || typeof self !== 'object' || self._wsid === undefined) {
-    throw new TypeError('Method WeakSet.prototype.' + method + ' called on incompatible receiver');
   }
 };
 const symbolIndex = (self: any, value: any): number => {
@@ -89,11 +78,13 @@ export const WeakSet = function (this: any) {
     throw new TypeError('WeakSet constructor argument is not iterable');
   }
   const iterator = method.call(iterable);
-  if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+  // inlined: isObject(iterator)
+  if ((iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function'))) throw new TypeError('Result of the Symbol.iterator method is not an object');
   const next = iterator.next;
   for (;;) {
     const step = next.call(iterator);
-    if (!isObject(step)) throw new TypeError('Iterator result is not an object');
+    // inlined: isObject(step)
+    if ((step === null || (typeof step !== 'object' && typeof step !== 'function'))) throw new TypeError('Iterator result is not an object');
     if (step.done) return;
     const value = step.value;
     try {
@@ -106,9 +97,14 @@ export const WeakSet = function (this: any) {
 } as any;
 
 WeakSet.prototype.add = function (this: any, value: any): any {
-  requireWeakSet(this, 'add');
-  if (!canBeHeldWeakly(value)) {
-    throw new TypeError('Invalid value used in weak set');
+  // inlined: requireWeakSet(this, 'add')
+  if (this === null || typeof this !== 'object' || this._wsid === undefined) {
+    throw new TypeError('Method WeakSet.prototype.add called on incompatible receiver');
+  }
+  // inlined: canBeHeldWeakly(value) -- an object, or a symbol not in the global
+  // registry; only a symbol reaches isRegisteredSymbol's try
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+    if (typeof value !== 'symbol' || isRegisteredSymbol(value)) throw new TypeError('Invalid value used in weak set');
   }
   if (typeof value === 'symbol') {
     if (symbolIndex(this, value) === -1) {
@@ -132,20 +128,28 @@ WeakSet.prototype.add = function (this: any, value: any): any {
 };
 
 WeakSet.prototype.has = function (this: any, value: any): boolean {
-  requireWeakSet(this, 'has');
+  // inlined: requireWeakSet(this, 'has')
+  if (this === null || typeof this !== 'object' || this._wsid === undefined) {
+    throw new TypeError('Method WeakSet.prototype.has called on incompatible receiver');
+  }
   if (typeof value === 'symbol') return symbolIndex(this, value) !== -1;
-  return isObject(value) && hasOwn.call(value, this._wsid);
+  // inlined: isObject(value)
+  return (value !== null && (typeof value === 'object' || typeof value === 'function')) && hasOwn.call(value, this._wsid);
 };
 
 WeakSet.prototype.delete = function (this: any, value: any): boolean {
-  requireWeakSet(this, 'delete');
+  // inlined: requireWeakSet(this, 'delete')
+  if (this === null || typeof this !== 'object' || this._wsid === undefined) {
+    throw new TypeError('Method WeakSet.prototype.delete called on incompatible receiver');
+  }
   if (typeof value === 'symbol') {
     const at = symbolIndex(this, value);
     if (at === -1) return false;
     this._syms.splice(at, 1);
     return true;
   }
-  if (!isObject(value) || !hasOwn.call(value, this._wsid)) return false;
+  // inlined: isObject(value)
+  if ((value === null || (typeof value !== 'object' && typeof value !== 'function')) || !hasOwn.call(value, this._wsid)) return false;
   delete value[this._wsid];
   return true;
 };

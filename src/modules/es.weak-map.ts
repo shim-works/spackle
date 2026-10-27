@@ -56,23 +56,13 @@ let counter = 0;
 // One reused descriptor per island: no allocation per construction.
 const SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 
-const isObject = (value: any): boolean =>
-  value !== null && (typeof value === 'object' || typeof value === 'function');
-
 // CanBeHeldWeakly: an object, or a symbol that is not in the global registry.
+// The try stays in here, so set() calls this for symbols only.
 const isRegisteredSymbol = (value: any): boolean => {
   try {
     return (Symbol as any).keyFor(value) !== undefined;
   } catch (e) {
     return false;
-  }
-};
-const canBeHeldWeakly = (value: any): boolean =>
-  isObject(value) || (typeof value === 'symbol' && !isRegisteredSymbol(value));
-
-const requireWeakMap = (self: any, method: string): void => {
-  if (self === null || typeof self !== 'object' || self._id === undefined) {
-    throw new TypeError('Method WeakMap.prototype.' + method + ' called on incompatible receiver');
   }
 };
 
@@ -122,7 +112,8 @@ export const WeakMap = function (this: any) {
   if (Array.isArray(iterable) && (!iteratorKey || (iterable[iteratorKey] === arrayIterAtLoad && (Array.prototype as any)[iteratorKey] === arrayIterAtLoad))) {
     for (let i = 0; i < iterable.length; i++) {
       const item = iterable[i];
-      if (!isObject(item)) throw new TypeError('Iterator value is not an entry object');
+      // inlined: isObject(item)
+      if ((item === null || (typeof item !== 'object' && typeof item !== 'function'))) throw new TypeError('Iterator value is not an entry object');
       adder.call(this, item[0], item[1]);
     }
     return;
@@ -132,15 +123,18 @@ export const WeakMap = function (this: any) {
     throw new TypeError('WeakMap constructor argument is not iterable');
   }
   const iterator = method.call(iterable);
-  if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+  // inlined: isObject(iterator)
+  if ((iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function'))) throw new TypeError('Result of the Symbol.iterator method is not an object');
   const next = iterator.next;
   for (;;) {
     const step = next.call(iterator);
-    if (!isObject(step)) throw new TypeError('Iterator result is not an object');
+    // inlined: isObject(step)
+    if ((step === null || (typeof step !== 'object' && typeof step !== 'function'))) throw new TypeError('Iterator result is not an object');
     if (step.done) return;
     const item = step.value;
     try {
-      if (!isObject(item)) throw new TypeError('Iterator value is not an entry object');
+      // inlined: isObject(item)
+      if ((item === null || (typeof item !== 'object' && typeof item !== 'function'))) throw new TypeError('Iterator value is not an entry object');
       adder.call(this, item[0], item[1]);
     } catch (error) {
       closeIterator(iterator);
@@ -153,9 +147,13 @@ export const WeakMap = function (this: any) {
 const SET_SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 
 WeakMap.prototype.set = function (this: any, key: any, value: any): any {
-  requireWeakMap(this, 'set');
-  if (!canBeHeldWeakly(key)) {
-    throw new TypeError('Invalid value used as weak map key');
+  // inlined: requireWeakMap(this, 'set')
+  if (this === null || typeof this !== 'object' || this._id === undefined) {
+    throw new TypeError('Method WeakMap.prototype.set called on incompatible receiver');
+  }
+  // inlined: canBeHeldWeakly(key) -- only a symbol reaches isRegisteredSymbol's try
+  if (key === null || (typeof key !== 'object' && typeof key !== 'function')) {
+    if (typeof key !== 'symbol' || isRegisteredSymbol(key)) throw new TypeError('Invalid value used as weak map key');
   }
   if (typeof key === 'symbol') {
     const at = symbolIndex(this, key);
@@ -195,25 +193,36 @@ WeakMap.prototype.set = function (this: any, key: any, value: any): any {
 };
 
 WeakMap.prototype.get = function (this: any, key: any): any {
-  requireWeakMap(this, 'get');
+  // inlined: requireWeakMap(this, 'get')
+  if (this === null || typeof this !== 'object' || this._id === undefined) {
+    throw new TypeError('Method WeakMap.prototype.get called on incompatible receiver');
+  }
   if (typeof key === 'symbol') {
     const at = symbolIndex(this, key);
     return at === -1 ? undefined : this._svals[at];
   }
-  if (!isObject(key) || !hasOwn.call(key, this._id)) {
+  // inlined: isObject(key)
+  if ((key === null || (typeof key !== 'object' && typeof key !== 'function')) || !hasOwn.call(key, this._id)) {
     return undefined;
   }
   return key[this._id];
 };
 
 WeakMap.prototype.has = function (this: any, key: any): boolean {
-  requireWeakMap(this, 'has');
+  // inlined: requireWeakMap(this, 'has')
+  if (this === null || typeof this !== 'object' || this._id === undefined) {
+    throw new TypeError('Method WeakMap.prototype.has called on incompatible receiver');
+  }
   if (typeof key === 'symbol') return symbolIndex(this, key) !== -1;
-  return isObject(key) && hasOwn.call(key, this._id);
+  // inlined: isObject(key)
+  return (key !== null && (typeof key === 'object' || typeof key === 'function')) && hasOwn.call(key, this._id);
 };
 
 WeakMap.prototype.delete = function (this: any, key: any): boolean {
-  requireWeakMap(this, 'delete');
+  // inlined: requireWeakMap(this, 'delete')
+  if (this === null || typeof this !== 'object' || this._id === undefined) {
+    throw new TypeError('Method WeakMap.prototype.delete called on incompatible receiver');
+  }
   if (typeof key === 'symbol') {
     const at = symbolIndex(this, key);
     if (at === -1) return false;
@@ -221,7 +230,8 @@ WeakMap.prototype.delete = function (this: any, key: any): boolean {
     this._svals.splice(at, 1);
     return true;
   }
-  if (!isObject(key) || !hasOwn.call(key, this._id)) {
+  // inlined: isObject(key)
+  if ((key === null || (typeof key !== 'object' && typeof key !== 'function')) || !hasOwn.call(key, this._id)) {
     return false;
   }
   delete key[this._id];

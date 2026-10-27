@@ -68,8 +68,9 @@ const isDetached = (value: any): boolean => {
  * Spec: https://tc39.es/proposal-arraybuffer-base64/#sec-frombase64
  *
  * Walks the original string so `read` indexes into it, advancing only at
- * complete 4-char chunks. Bytes go out through `emit` as produced, so
- * setFromBase64 keeps what it decoded before invalid input.
+ * complete 4-char chunks. Bytes are written into `target` as produced (byte n
+ * at index n), so setFromBase64 keeps what it decoded before invalid input. A
+ * target, not an emit callback: no closure per call and no call per byte.
  *
  * lastChunkHandling:
  *   'loose'               (default) a 2- or 3-char tail decodes; extra bits ignored
@@ -81,7 +82,7 @@ const decodeBase64 = (
   chars: string,
   maxBytes: number,
   lastChunkHandling: string,
-  emit: (byte: number) => void,
+  target: any,
 ): { read: number; written: number } => {
   // Spec: maxLength 0 returns before examining any character.
   if (maxBytes === 0) {
@@ -93,21 +94,6 @@ const decodeBase64 = (
   let written = 0;
   let chunk = 0;
   let chunkLength = 0;
-
-  const flushPartial = (): void => {
-    // 2 chars -> 1 byte, 3 chars -> 2 bytes
-    if (chunkLength === 2) {
-      emit((chunk >> 4) & 255);
-      written++;
-    } else {
-      emit((chunk >> 10) & 255);
-      emit((chunk >> 2) & 255);
-      written += 2;
-    }
-  };
-
-  const extraBitsSet = (): boolean =>
-    chunkLength === 2 ? (chunk & 15) !== 0 : (chunk & 3) !== 0;
 
   for (;;) {
     if (index === length) {
@@ -124,7 +110,13 @@ const decodeBase64 = (
         if (written + (chunkLength - 1) > maxBytes) {
           return { read: read, written: written };
         }
-        flushPartial();
+        // inlined: flushPartial() -- 2 chars -> 1 byte, 3 chars -> 2 bytes
+        if (chunkLength === 2) {
+          target[written++] = (chunk >> 4) & 255;
+        } else {
+          target[written++] = (chunk >> 10) & 255;
+          target[written++] = (chunk >> 2) & 255;
+        }
       }
       return { read: length, written: written };
     }
@@ -159,13 +151,20 @@ const decodeBase64 = (
         }
         throw new SyntaxError('Invalid base64: missing padding');
       }
-      if (lastChunkHandling === 'strict' && extraBitsSet()) {
+      // inlined: extraBitsSet()
+      if (lastChunkHandling === 'strict' && (chunkLength === 2 ? (chunk & 15) !== 0 : (chunk & 3) !== 0)) {
         throw new SyntaxError('Invalid base64: non-zero padding bits');
       }
       if (written + (chunkLength - 1) > maxBytes) {
         return { read: read, written: written };
       }
-      flushPartial();
+      // inlined: flushPartial() -- 2 chars -> 1 byte, 3 chars -> 2 bytes
+      if (chunkLength === 2) {
+        target[written++] = (chunk >> 4) & 255;
+      } else {
+        target[written++] = (chunk >> 10) & 255;
+        target[written++] = (chunk >> 2) & 255;
+      }
       return { read: length, written: written };
     }
 
@@ -185,9 +184,10 @@ const decodeBase64 = (
       if (written + 3 > maxBytes) {
         return { read: read, written: written };
       }
-      emit((chunk >> 16) & 255);
-      emit((chunk >> 8) & 255);
-      emit(chunk & 255);
+      // inlined: emit(byte) x3
+      target[written] = (chunk >> 16) & 255;
+      target[written + 1] = (chunk >> 8) & 255;
+      target[written + 2] = chunk & 255;
       written += 3;
       chunk = 0;
       chunkLength = 0;
@@ -202,7 +202,7 @@ const decodeBase64 = (
 const decodeHex = (
   input: string,
   maxBytes: number,
-  emit: (byte: number) => void,
+  target: any,
 ): { read: number; written: number } => {
   if (input.length % 2 !== 0) {
     throw new SyntaxError('Invalid hex string: odd length');
@@ -217,8 +217,8 @@ const decodeHex = (
       // spec keeps whatever was decoded before the bad pair
       throw new SyntaxError('Invalid hex string: bad character');
     }
-    emit(high * 16 + low);
-    written++;
+    // inlined: emit(byte)
+    target[written++] = high * 16 + low;
     read = i + 2;
   }
   return { read: read, written: written };
@@ -329,7 +329,7 @@ export const uint8ArrayFromBase64 = function (input: any): any {
     throw new TypeError("lastChunkHandling must be 'loose', 'strict' or 'stop-before-partial'");
   }
   const bytes: number[] = [];
-  decodeBase64(input, chars, Infinity, lastChunkHandling, (b) => bytes.push(b));
+  decodeBase64(input, chars, Infinity, lastChunkHandling, bytes);
   const out = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) out[i] = bytes[i];
   return out;
@@ -340,7 +340,7 @@ export const uint8ArrayFromHex = function (input: any): any {
     throw new TypeError('argument must be a string');
   }
   const bytes: number[] = [];
-  decodeHex(input, Infinity, (b) => bytes.push(b));
+  decodeHex(input, Infinity, bytes);
   const out = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) out[i] = bytes[i];
   return out;
@@ -388,13 +388,9 @@ export const uint8ArraySetFromBase64 = function (
   if (isDetached(this)) {
     throw new TypeError('Uint8Array.prototype.setFromBase64 called on a detached buffer');
   }
-  const target = this;
-  let cursor = 0;
   // write as we decode: on invalid input the spec keeps whatever was already
   // written rather than leaving the target untouched
-  return decodeBase64(input, chars, target.length, lastChunkHandling, (b) => {
-    target[cursor++] = b;
-  });
+  return decodeBase64(input, chars, this.length, lastChunkHandling, this);
 };
 
 export const uint8ArraySetFromHex = function (
@@ -418,11 +414,7 @@ export const uint8ArraySetFromHex = function (
   if (typeof input !== 'string') {
     throw new TypeError('argument must be a string');
   }
-  const target = this;
-  let cursor = 0;
-  return decodeHex(input, target.length, (b) => {
-    target[cursor++] = b;
-  });
+  return decodeHex(input, this.length, this);
 };
 
 // Spec arity. A function's own .length counts declared parameters, so the

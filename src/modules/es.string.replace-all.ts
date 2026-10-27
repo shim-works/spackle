@@ -51,12 +51,6 @@ const substitute = (
   return result;
 };
 
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 const objectToString = Object.prototype.toString;
 
 export const stringReplaceAll = function replaceAll(this: any, searchValue: any, replaceValue: any): string {
@@ -78,7 +72,9 @@ export const stringReplaceAll = function replaceAll(this: any, searchValue: any,
       if (flags === null || flags === undefined) {
         throw new TypeError('replaceAll called with a RegExp whose flags are null or undefined');
       }
-      if (toStr(flags).indexOf('g') === -1) {
+      // inlined: toStr(flags) -- String(symbol) returns "Symbol(...)"; the spec throws
+      if (typeof flags === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      if ((typeof flags === 'string' ? flags : String(flags)).indexOf('g') === -1) {
         throw new TypeError('replaceAll must be called with a global RegExp');
       }
     }
@@ -97,27 +93,41 @@ export const stringReplaceAll = function replaceAll(this: any, searchValue: any,
       !(replaceKey && replaceKey in searchValue) &&
       !(replaceKey && typeof (RegExp.prototype as any)[replaceKey] === 'function')
     ) {
-      return String.prototype.replace.call(toStr(this), searchValue, replaceValue);
+      // inlined: toStr(this)
+      if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      return String.prototype.replace.call(typeof this === 'string' ? this : String(this), searchValue, replaceValue);
     }
   }
 
-  const source = toStr(this);
-  const searchString = toStr(searchValue);
+  // inlined: toStr(this), toStr(searchValue), toStr(replaceValue)
+  if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const source: string = typeof this === 'string' ? this : String(this);
+  if (typeof searchValue === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const searchString: string = typeof searchValue === 'string' ? searchValue : String(searchValue);
   const isFunction = typeof replaceValue === 'function';
-  const replacementString = isFunction ? '' : toStr(replaceValue);
+  if (!isFunction && typeof replaceValue === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const replacementString: string = isFunction ? '' : typeof replaceValue === 'string' ? replaceValue : String(replaceValue);
   // inlined: substitute()'s fast path -- no '$' means every match is replaced verbatim
   const hasDollar = replacementString.indexOf('$') !== -1;
 
   // weird edge the spec demands: an empty search string "matches" in the gap
   // before every character AND at the very end
   if (searchString === '') {
-    let result = isFunction
-      ? toStr(replaceValue('', 0, source))
-      : hasDollar ? substitute(replacementString, '', 0, source) : replacementString;
+    let result: any;
+    if (isFunction) {
+      // inlined: toStr(replaceValue('', 0, source))
+      result = replaceValue('', 0, source);
+      if (typeof result === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      if (typeof result !== 'string') result = String(result);
+    } else result = hasDollar ? substitute(replacementString, '', 0, source) : replacementString;
     for (let i = 0; i < source.length; i++) {
-      const replacement = isFunction
-        ? toStr(replaceValue('', i + 1, source))
-        : hasDollar ? substitute(replacementString, '', i + 1, source) : replacementString;
+      let replacement: any;
+      if (isFunction) {
+        // inlined: toStr(replaceValue('', i + 1, source))
+        replacement = replaceValue('', i + 1, source);
+        if (typeof replacement === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+        if (typeof replacement !== 'string') replacement = String(replacement);
+      } else replacement = hasDollar ? substitute(replacementString, '', i + 1, source) : replacementString;
       result += source.charAt(i) + replacement;
     }
     return result;
@@ -127,9 +137,13 @@ export const stringReplaceAll = function replaceAll(this: any, searchValue: any,
   let position = 0;
   let index = source.indexOf(searchString, position);
   while (index !== -1) {
-    const replacement = isFunction
-      ? toStr(replaceValue(searchString, index, source))
-      : hasDollar ? substitute(replacementString, searchString, index, source) : replacementString;
+    let replacement: any;
+    if (isFunction) {
+      // inlined: toStr(replaceValue(searchString, index, source))
+      replacement = replaceValue(searchString, index, source);
+      if (typeof replacement === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      if (typeof replacement !== 'string') replacement = String(replacement);
+    } else replacement = hasDollar ? substitute(replacementString, searchString, index, source) : replacementString;
     result += source.substring(position, index) + replacement;
     position = index + searchString.length;
     index = source.indexOf(searchString, position);

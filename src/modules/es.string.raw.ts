@@ -7,12 +7,6 @@ export const isSupported = (): boolean => {
 };
 
 /** Spec: https://tc39.es/ecma262/#sec-string.raw */
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 export const stringRaw = function raw(template: any): string {
   if (template === null || template === undefined) {
     throw new TypeError('Cannot convert undefined or null to object');
@@ -34,12 +28,18 @@ export const stringRaw = function raw(template: any): string {
   let result = '';
   const substitutionCount = arguments.length - 1;
   for (let i = 0; ; i++) {
-    result += toStr(boxed[i]);
+    // inlined: toStr(boxed[i]) -- String(symbol) returns "Symbol(...)"; the spec throws
+    const literal = boxed[i];
+    if (typeof literal === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+    result += typeof literal === 'string' ? literal : String(literal);
     if (i + 1 === literalCount) {
       return result; // last chunk has no substitution after it
     }
     if (i < substitutionCount) {
-      result += toStr(arguments[i + 1]);
+      // inlined: toStr(arguments[i + 1])
+      const substitution = arguments[i + 1];
+      if (typeof substitution === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      result += typeof substitution === 'string' ? substitution : String(substitution);
     }
   }
 };

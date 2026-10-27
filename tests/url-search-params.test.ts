@@ -1,4 +1,4 @@
-import { URLSearchParams as USPPolyfill } from '../src/modules/web.url-search-params.js';
+import { URLSearchParams as USPPolyfill, install as installUSP } from '../src/modules/web.url-search-params.js';
 
 
 describe('URLSearchParams — polyfill vs native', () => {
@@ -139,5 +139,70 @@ describe('URLSearchParams polyfill — iteration', () => {
   it('refuses next on a foreign receiver', () => {
     const next = Object.getPrototypeOf(new P('').entries()).next;
     expect(() => next.call({})).toThrow(TypeError);
+  });
+});
+
+// Native fetch / Request only know the engine's own URLSearchParams: a polyfilled
+// body goes out as text/plain, and form endpoints answer with an empty body.
+describe('URLSearchParams — polyfilled body through native fetch / Request', () => {
+  const w: any = window;
+  const FORM = 'application/x-www-form-urlencoded;charset=UTF-8';
+  const keys = ['URLSearchParams', 'fetch', 'Request'];
+  let saved: any[] = [];
+  let savedCtor: any;
+  let calls: any[][] = [];
+
+  beforeEach(() => {
+    saved = keys.map((k) => Object.getOwnPropertyDescriptor(w, k));
+    savedCtor = Object.getOwnPropertyDescriptor(w.Request.prototype, 'constructor');
+    calls = [];
+    w.fetch = function (_input: any, _init?: any) {
+      calls.push(Array.prototype.slice.call(arguments));
+      return Promise.resolve(new Response('{}'));
+    };
+    installUSP();
+  });
+
+  afterEach(() => {
+    keys.forEach((k, i) => Object.defineProperty(w, k, saved[i]));
+    Object.defineProperty(w.Request.prototype, 'constructor', savedCtor);
+  });
+
+  it('native Request alone labels a polyfilled body text/plain (the bug)', () => {
+    const req = new (saved[2].value)('https://x/', { method: 'POST', body: new USPPolyfill('a=1') });
+    expect(req.headers.get('content-type')).toBe('text/plain;charset=UTF-8');
+  });
+
+  it('fetch sends a polyfilled body as a form string', () => {
+    w.fetch('https://x/', { method: 'POST', body: new USPPolyfill('a=1&b=2') });
+    const init = calls[0][1];
+    expect([calls[0][0], init.method, init.body, new Headers(init.headers).get('content-type')])
+      .toEqual(['https://x/', 'POST', 'a=1&b=2', FORM]);
+  });
+
+  it('Request labels a polyfilled body as a form', async () => {
+    const req = new w.Request('https://x/', { method: 'POST', body: new USPPolyfill('a=1') });
+    expect([req.headers.get('content-type'), await req.text(), req instanceof w.Request])
+      .toEqual([FORM, 'a=1', true]);
+  });
+
+  it("keeps the app's own content-type", () => {
+    const headers = { 'content-type': 'application/json' };
+    w.fetch('https://x/', { method: 'POST', body: new USPPolyfill('a=1'), headers: headers });
+    expect(new Headers(calls[0][1].headers).get('content-type')).toBe('application/json');
+    const req = new w.Request('https://x/', { method: 'POST', body: new USPPolyfill('a=1'), headers: headers });
+    expect(req.headers.get('content-type')).toBe('application/json');
+  });
+
+  it('leaves other bodies and calls alone', () => {
+    const init = { method: 'POST', body: 'a=1' };
+    w.fetch('https://x/', init);
+    w.fetch('https://x/');
+    expect([calls[0][1], calls[1].length]).toEqual([init, 1]);
+    expect(new w.Request('https://x/', init).headers.get('content-type')).toBe('text/plain;charset=UTF-8');
+  });
+
+  it('Request still needs new', () => {
+    expect(() => w.Request('https://x/')).toThrow(TypeError);
   });
 });

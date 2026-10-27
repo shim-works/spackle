@@ -14,12 +14,6 @@ export const isSupported = (): boolean => {
 
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype-@@iterator */
 
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 const returnSelf = function (this: any) {
   return this;
 };
@@ -96,7 +90,9 @@ export const stringIterator = function (this: any): any {
   }
   const iterator: any = Object.create(StringIteratorPrototype);
   // internal slots stay non-enumerable, like the spec's: Object.keys(iterator) is []
-  slotDesc.value = toStr(this);
+  // inlined: toStr(this) -- String(symbol) returns "Symbol(...)"; the spec throws
+  if (typeof this === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  slotDesc.value = typeof this === 'string' ? this : String(this);
   Object.defineProperty(iterator, '_string', slotDesc);
   slotDesc.value = 0;
   Object.defineProperty(iterator, '_index', slotDesc);

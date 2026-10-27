@@ -547,7 +547,8 @@ function basicParse(input: string, base: any, url: any, stateOverride: number): 
   for (;;) {
     // '' is EOF
     const c = pointer < len ? input.charAt(pointer) : '';
-    const special = isSpecialScheme(url.scheme);
+    // inlined: isSpecialScheme(url.scheme) -- this runs once per input char
+    const special = hasOwn.call(SPECIAL, url.scheme);
     switch (state) {
       case SCHEME_START:
         if (c !== '' && isAlpha(c)) {

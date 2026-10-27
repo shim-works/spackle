@@ -92,12 +92,6 @@ if (typeof Symbol !== "undefined" && (Symbol as any).iterator) {
 
 const objectToString = Object.prototype.toString;
 
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws a TypeError.
-const toStr = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 // RegExp.prototype[@@matchAll], inline: no engine this installs on has one.
 const regExpMatchAll = (R: any, s: string): any => {
   const Default = (window as any).RegExp;
@@ -150,7 +144,9 @@ export const stringMatchAll = function matchAll(this: any, regexp: any): any {
       if (flags === null || flags === undefined) {
         throw new TypeError("String.prototype.matchAll called with a RegExp whose flags are null or undefined");
       }
-      if (toStr(flags).indexOf("g") === -1) {
+      // inlined: toStr(flags) -- String(symbol) returns "Symbol(...)"; the spec throws
+      if (typeof flags === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+      if ((typeof flags === "string" ? flags : String(flags)).indexOf("g") === -1) {
         throw new TypeError(
           "String.prototype.matchAll called with a non-global RegExp argument",
         );
@@ -166,10 +162,14 @@ export const stringMatchAll = function matchAll(this: any, regexp: any): any {
     // without one get that method's steps run directly -- keeping its flags and
     // lastIndex, which RegExpCreate below would discard.
     if (objectToString.call(regexp) === "[object RegExp]" && !(matchAllKey && typeof (RegExp.prototype as any)[matchAllKey] === "function")) {
-      return regExpMatchAll(regexp, toStr(this));
+      // inlined: toStr(this)
+      if (typeof this === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+      return regExpMatchAll(regexp, typeof this === "string" ? this : String(this));
     }
   }
-  const s = toStr(this);
+  // inlined: toStr(this)
+  if (typeof this === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+  const s = typeof this === "string" ? this : String(this);
   // RegExpCreate(regexp, "g"), then Invoke(rx, @@matchAll, S)
   const rx = new ((window as any).RegExp)(regexp === undefined ? "" : regexp, "g");
   const method = matchAllKey ? rx[matchAllKey] : undefined;
