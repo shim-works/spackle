@@ -4,17 +4,23 @@ export const isSupported = (): boolean => {
   try {
     const method = Array.prototype.reduceRight;
     if (typeof method !== 'function') return false;
-    // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length as 1
-    // and finds nothing, where on a huge real length it would walk ~2^32 indices
-    // (the Chrome 38 hang). A ToLength native starts at index 2^32, present, where
-    // the callback throws, so the probe ends at once on both.
-    const o: any = { length: 4294967297, 4294967296: 'x' };
+    // core-js CHROME_BUG: Chrome 80-82 reduceRight
+    const chrome = /Chrome\/(\d+)/.exec((window.navigator && window.navigator.userAgent) || '');
+    if (chrome && +chrome[1] > 79 && +chrome[1] < 83) return false;
+    // core-js arrayMethodIsStrict: throws on a null this
     try {
-      (method as any).call(o, function () { throw STOP; }, 0);
+      (method as any).call(null, () => 1, 1);
       return false;
-    } catch (e) {
-      return e === STOP;
+    } catch {
+      /* strict, as it should be */
     }
+    // ToLength, not ToUint32 (Chrome < 45). Length -1: ToLength reads 0 and
+    // returns the initial value at once; ToUint32 reads 2^32-1 and hits the
+    // throwing getter at its first index. Never a walk, whatever the engine does
+    // with the length (see lastIndexOf).
+    const o: any = { length: -1 };
+    Object.defineProperty(o, 4294967294, { get: function () { throw STOP; }, configurable: true });
+    return (method as any).call(o, function () { return 1; }, 0) === 0;
   } catch {
     return false;
   }

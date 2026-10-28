@@ -7,12 +7,11 @@ export const isSupported = (): boolean => {
     if (!species) return false;
     const speciesDescriptor = Object.getOwnPropertyDescriptor(Array, species);
     if (!speciesDescriptor || typeof speciesDescriptor.get !== 'function' || (speciesDescriptor.get as any).__polyfilled === true) return false;
-    // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length
-    // as 1 and answers at once, where on a huge real length it would walk ~2^32
-    // indices (the Chrome 38 hang / OOM)
-    const o: any = { length: 4294967297, 4294967296: 'x' };
-    const r = (Array.prototype.splice as any).call(o, 4294967296, 1);
-    return r.length === 1 && r[0] === 'x';
+    // ToLength, not ToUint32 (Chrome < 45). Length -1: ToLength reads 0 and
+    // removes nothing; ToUint32 reads 2^32-1 and removes the one 'x'. Never a
+    // walk, whatever the engine does with the length (see lastIndexOf).
+    const o: any = { length: -1, 4294967294: 'x' };
+    return (Array.prototype.splice as any).call(o, 4294967294, 1).length === 0;
   } catch {
     return false;
   }

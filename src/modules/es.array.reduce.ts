@@ -4,6 +4,16 @@ export const isSupported = (): boolean => {
   try {
     const method = Array.prototype.reduce;
     if (typeof method !== 'function') return false;
+    // core-js CHROME_BUG: Chrome 80-82 reduce
+    const chrome = /Chrome\/(\d+)/.exec((window.navigator && window.navigator.userAgent) || '');
+    if (chrome && +chrome[1] > 79 && +chrome[1] < 83) return false;
+    // core-js arrayMethodIsStrict: throws on a null this
+    try {
+      (method as any).call(null, () => 1, 1);
+      return false;
+    } catch {
+      /* strict, as it should be */
+    }
     // ToLength, not ToUint32 (Chrome < 45): a 32-bit native reads this length as 1
     // and visits only index 0, where on a huge real length it would walk ~2^32
     // indices (the Chrome 38 hang). A ToLength native goes on to index 1, where the
