@@ -1,7 +1,9 @@
 export const isSupported = (): boolean => {
   try {
-    // core-js WRONG_ARITY
-    return typeof (window as any).queueMicrotask === 'function' && (window as any).queueMicrotask.length === 1;
+    const qm = (window as any).queueMicrotask;
+    // core-js WRONG_ARITY; native-only: a setTimeout shim from an earlier script
+    // passes the arity check but costs a timer tick per promise job.
+    return typeof qm === 'function' && qm.length === 1 && /\[native code\]/.test(Function.prototype.toString.call(qm));
   } catch {
     return false;
   }
@@ -19,7 +21,13 @@ export const isSupported = (): boolean => {
 // Captured at load, before es.promise installs: a replaced native gets its then
 // patched to route through spackle's Promise, which schedules through this
 // queue -- reading either later would recurse.
-const NativePromise: any = typeof Promise === 'function' && typeof Promise.resolve === 'function' ? Promise : null;
+// Native-only: a Promise polyfilled before spackle may itself wake on setTimeout.
+const NativePromise: any =
+  typeof Promise === 'function' &&
+  typeof Promise.resolve === 'function' &&
+  /\[native code\]/.test(Function.prototype.toString.call(Promise))
+    ? Promise
+    : null;
 const nativeThen: any = NativePromise && NativePromise.prototype && NativePromise.prototype.then;
 
 const CAPACITY = 1024;

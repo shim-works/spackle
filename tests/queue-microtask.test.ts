@@ -1,4 +1,4 @@
-import { queueMicrotask as queueMicrotaskPolyfill } from '../src/modules/web.queue-microtask.js';
+import { isSupported, queueMicrotask as queueMicrotaskPolyfill } from '../src/modules/web.queue-microtask.js';
 
 /**
  * Conformance suite for the queueMicrotask polyfill.
@@ -121,4 +121,20 @@ describe('queueMicrotask — polyfill', () => {
     // local alias so the macrotask-ordering test reads naturally
     queueMicrotaskPolyfill(cb);
   }
+});
+
+describe('queueMicrotask — isSupported', () => {
+  it('rejects a non-native shim with the right arity', () => {
+    const w: any = window;
+    const native = w.queueMicrotask;
+    w.queueMicrotask = function (cb: () => void) {
+      setTimeout(cb, 0);
+    };
+    try {
+      expect(isSupported()).toBe(false);
+    } finally {
+      w.queueMicrotask = native;
+    }
+    expect(isSupported()).toBe(true);
+  });
 });
