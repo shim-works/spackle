@@ -124,6 +124,9 @@ export const isSupported = (): boolean => {
  * Shared spec machinery for this island (WET: no imports across islands).
  * Native probes are captured at load, before any user code can patch them.
  */
+// The engine's own: install-polyfills.ts imports this island ahead of
+// es.object.to-string, whose patch holds a try/catch old V8 won't optimise.
+// Host typed arrays carry their class string natively, so no tag read needed.
 const objectToString = Object.prototype.toString;
 const hasOwn = Object.prototype.hasOwnProperty;
 const isObject = (value: any): boolean =>

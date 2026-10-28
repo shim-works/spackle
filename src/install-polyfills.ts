@@ -7,6 +7,11 @@
 // friends as property keys at module scope, before installPolyfills() runs.
 import { start, step, summary } from './trace.js';
 import { applySymbolKeyFilters } from './modules/es.symbol.js';
+// Ahead of es.object.to-string, which patches Object.prototype.toString on
+// import: these capture the engine's own at load (its try/catch costs them on
+// old V8, per cloned value / per typed-array call).
+import { isSupported as isStructuredCloneSupported, structuredClone } from './modules/web.structured-clone.js';
+import { installTypedArray } from './modules/install-typed-array.js';
 
 import { define } from './define.js';
 
@@ -125,7 +130,6 @@ import { isSupported as isArrayBufferDetachedSupported, install as installArrayB
 import { isSupported as isArrayBufferTransferSupported, install as installArrayBufferTransfer } from './modules/es.array-buffer.transfer.js';
 import { isSupported as isArrayBufferImplSupported, installArrayBuffer } from './modules/install-array-buffer.js';
 import { isSupported as isFloat16ImplSupported, installFloat16 } from './modules/install-float16.js';
-import { installTypedArray } from './modules/install-typed-array.js';
 import { isSupported as isUint8ArrayImplSupported, installUint8Array } from './modules/install-uint8-array.js';
 import { isSupported as isDateToIsoStringSupported, dateToISOString } from './modules/es.date.to-iso-string.js';
 import { isSupported as isDateToJsonSupported, dateToJSON } from './modules/es.date.to-json.js';
@@ -176,7 +180,6 @@ import { isSupported as isSetImmediateImplSupported, installSetImmediate } from 
 import { isSupported as isAtobSupported, atobPolyfill } from './modules/web.atob.js';
 import { isSupported as isQueueMicrotaskSupported, queueMicrotask } from './modules/web.queue-microtask.js';
 import { isSupported as isSelfSupported, install as installSelf } from './modules/web.self.js';
-import { isSupported as isStructuredCloneSupported, structuredClone } from './modules/web.structured-clone.js';
 import { isSupported as isUrlSearchParamsDeleteSupported, install as installUrlSearchParamsDelete } from './modules/web.url-search-params.delete.js';
 import { isSupported as isUrlSearchParamsHasSupported, install as installUrlSearchParamsHas } from './modules/web.url-search-params.has.js';
 import { isSupported as isUrlSearchParamsSizeSupported, install as installUrlSearchParamsSize } from './modules/web.url-search-params.size.js';

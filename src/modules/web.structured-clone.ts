@@ -39,7 +39,20 @@ export const isSupported = (): boolean => {
  */
 
 const hasOwn = Object.prototype.hasOwnProperty;
-const objectToString = Object.prototype.toString;
+/*
+ * The engine's own toString, captured before es.object.to-string patches it
+ * (install-polyfills.ts imports this island ahead of that one): the patched one
+ * holds a try/catch, which old V8 won't optimise, and this runs per cloned
+ * value. @@toStringTag is read here instead, so spackle's own Map, Set and
+ * typed arrays (tagged, but [object Object] natively on Safari 7.1) still
+ * dispatch by type.
+ */
+const nativeToString = Object.prototype.toString;
+const tagKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
+const classOf = (value: any): string => {
+  const tag = tagKey ? value[tagKey] : undefined;
+  return typeof tag === 'string' ? '[object ' + tag + ']' : nativeToString.call(value);
+};
 
 /*
  * The seen-table is the engine's own Map, captured before es.map can replace it
@@ -152,7 +165,7 @@ const cloneValue = (value: any, seen: any): any => {
   // object nested in another made each clone ~500x slower than core-js.
   // A polyfilled Promise can report [object Object] (no @@toStringTag support),
   // so promises go on to the chain, which refuses them.
-  if (objectToString.call(value) === '[object Object]' && !(typeof Promise === 'function' && value instanceof Promise)) {
+  if (classOf(value) === '[object Object]' && !(typeof Promise === 'function' && value instanceof Promise)) {
     const copy: any = {};
     seen.set(value, copy);
     copyProperties(value, copy, seen);
@@ -227,7 +240,7 @@ const cloneValue = (value: any, seen: any): any => {
       const targetBytes = new Uint8Array(buffer);
       for (let i = 0; i < sourceBytes.length; i++) targetBytes[i] = sourceBytes[i];
     }
-    const copy = objectToString.call(value) === '[object DataView]'
+    const copy = classOf(value) === '[object DataView]'
       ? new DataView(buffer, value.byteOffset, value.byteLength)
       : new value.constructor(buffer, value.byteOffset, value.length);
     seen.set(value, copy);
@@ -237,7 +250,7 @@ const cloneValue = (value: any, seen: any): any => {
   const DOMExceptionCtor = (window as any).DOMException;
   const isDOMException =
     (typeof DOMExceptionCtor === 'function' && value instanceof DOMExceptionCtor) ||
-    objectToString.call(value) === '[object DOMException]';
+    classOf(value) === '[object DOMException]';
 
   /*
    * HTML StructuredSerializeInternal, Error branch: only the seven native error
@@ -278,7 +291,7 @@ const cloneValue = (value: any, seen: any): any => {
     return copy;
   }
 
-  const tag = objectToString.call(value);
+  const tag = classOf(value);
   if (tag === '[object Number]' || tag === '[object String]' || tag === '[object Boolean]') {
     const copy = Object(value.valueOf());
     seen.set(value, copy);
