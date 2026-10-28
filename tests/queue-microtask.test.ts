@@ -84,6 +84,30 @@ describe('queueMicrotask — polyfill', () => {
     for (let i = 0; i < 6000; i++) if (seen[i] !== i) throw new Error('out of order at ' + i);
   });
 
+  it('wakes through the then captured at load, not a later-patched one', async () => {
+    // es.promise's adoptNative patches a replaced native's then to route through
+    // spackle's Promise, which schedules through this queue: reading it late recurses.
+    // Patched only around the synchronous wake: the test runner itself needs then.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const savedThen = Promise.prototype.then;
+    let ran = false;
+    let patchedCalled = false;
+    (Promise.prototype as any).then = function () {
+      patchedCalled = true;
+      throw new Error('patched then reached');
+    };
+    try {
+      queueMicrotaskPolyfill(() => {
+        ran = true;
+      });
+    } finally {
+      Promise.prototype.then = savedThen;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(patchedCalled).toBe(false);
+    expect(ran).toBe(true);
+  });
+
   it('throws synchronously when the argument is not a function', () => {
     expect(() => (queueMicrotaskPolyfill as any)(42)).toThrow(TypeError);
   });

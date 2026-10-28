@@ -11,16 +11,34 @@ export const isSupported = (): boolean => {
  * Spec: https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#dom-queuemicrotask
  *
  * One queue, one wake-up per turn, drained to empty (same scheduler shape as
- * es.promise.ts). MutationObserver because the callback must be a microtask;
- * MessageChannel (a macrotask, later than spec but unclamped) as fallback, with
- * core-js's exclusions for old iOS/webOS WebKit; setTimeout only when neither
- * exists. Initialised lazily, so importing has no side effects.
+ * es.promise.ts). The wake-up is a native Promise.then where there is one;
+ * otherwise core-js's MutationObserver, minus its old iOS/webOS WebKit
+ * exclusions; setTimeout only when neither works (iOS 7.1: no Promise, MO
+ * excluded). Initialised lazily, so importing has no side effects.
  */
+// Captured at load, before es.promise installs: a replaced native gets its then
+// patched to route through spackle's Promise, which schedules through this
+// queue -- reading either later would recurse.
+const NativePromise: any = typeof Promise === 'function' && typeof Promise.resolve === 'function' ? Promise : null;
+const nativeThen: any = NativePromise && NativePromise.prototype && NativePromise.prototype.then;
+
 const CAPACITY = 1024;
 const queue: any[] = [];
 let head = 0;
 let scheduled = false;
 let fast: (() => void) | null = null;
+
+// The try kept out of drain's loop (old V8 won't optimise a function holding one).
+const runCallback = (callback: any): void => {
+  try {
+    callback();
+  } catch (error) {
+    // Rethrow from a timer: reaches window.onerror, and this drain continues.
+    setTimeout(function () {
+      throw error;
+    }, 0);
+  }
+};
 
 const drain = (): void => {
   scheduled = false;
@@ -28,14 +46,7 @@ const drain = (): void => {
     const callback = queue[head];
     queue[head] = undefined;
     head++;
-    try {
-      callback();
-    } catch (error) {
-      // Rethrow from a timer: reaches window.onerror, and this drain continues.
-      setTimeout(function () {
-        throw error;
-      }, 0);
-    }
+    runCallback(callback);
     // Past CAPACITY, slide the unrun tail down to 0 so a long-lived drain doesn't
     // grow the array forever (asap's fix). Amortised O(1).
     if (head > CAPACITY) {
@@ -57,7 +68,16 @@ const wake = (): void => {
     const brokenObserver =
       /(?:ipad|iphone|ipod).*applewebkit/i.test(ua) || /web0s(?!.*chrome)/i.test(ua);
 
-    if (MO && w.document && !brokenObserver) {
+    if (typeof nativeThen === 'function') {
+      // core-js's setup: resolve(undefined) (a bare resolve() throws on LG webOS
+      // 2), and an own constructor so the native then's species lookup stays on
+      // the native (iOS Safari 10.1; also skips spackle's proto splice).
+      const resolved = NativePromise.resolve(undefined);
+      resolved.constructor = NativePromise;
+      fast = function (): void {
+        nativeThen.call(resolved, drain);
+      };
+    } else if (MO && w.document && !brokenObserver) {
       // Detached text node: flipping its data is the cheapest observable mutation.
       let toggle = true;
       const node = w.document.createTextNode('');
@@ -65,12 +85,6 @@ const wake = (): void => {
       fast = function (): void {
         toggle = !toggle;
         node.data = toggle ? '1' : '0';
-      };
-    } else if (typeof w.MessageChannel === 'function') {
-      const channel = new w.MessageChannel();
-      channel.port1.onmessage = drain;
-      fast = function (): void {
-        channel.port2.postMessage(0);
       };
     } else {
       // Last-resort scheduler only, not a watchdog alongside a working fast path.
