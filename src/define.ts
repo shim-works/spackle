@@ -3,7 +3,6 @@
  * `__polyfilled` for spackle-verify. Both swallow: a locked-down owner costs that
  * one member, not the install run.
  */
-import { installed } from './trace.js';
 
 /* Non-configurable once set: re-stamping on a repeat install throws, so own try. */
 const mark = (fn: any): void => {
@@ -24,7 +23,6 @@ export const define = (owner: any, key: any, value: any, name?: string): void =>
       /* Function#name non-configurable pre-ES6 */
     }
     mark(value);
-    installed.push(name === undefined ? String(key) : name);
   } catch (e) {
     /* locked-down owner: skip this member, keep installing */
   }
@@ -43,7 +41,6 @@ export const defineGetter = (owner: any, key: any, getter: () => any, name?: str
       /* Function#name non-configurable pre-ES6 */
     }
     Object.defineProperty(owner, key, { configurable: true, enumerable: false, get: getter });
-    installed.push(name === undefined ? 'get ' + String(key) : name);
   } catch (e) {
     /* locked-down owner: skip this member, keep installing */
   }

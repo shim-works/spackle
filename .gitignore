@@ -9,4 +9,9 @@
 /src/debug/
 /docs/specs/
 *.tgz
-/results
+/results/*
+!/results/webview-capture/
+/results/webview-capture/*
+!/results/webview-capture/summary.csv
+!/results/webview-capture/results.json
+*.mov
