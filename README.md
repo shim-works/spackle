@@ -11,6 +11,12 @@
 </p>
 
 <p align="center">
+  <a href="https://spackle.samseabourn.com"><strong>Website</strong></a> &nbsp;·&nbsp;
+  <a href="https://spackle.samseabourn.com/verify/">Test your device</a> &nbsp;·&nbsp;
+  <a href="https://spackle.samseabourn.com/paper/">Paper</a>
+</p>
+
+<p align="center">
   <a href="#-installation">Install</a> &nbsp;·&nbsp;
   <a href="#-spackle-benchmarks">Benchmarks</a> &nbsp;·&nbsp;
   <a href="#%EF%B8%8F-migrating-from-core-js">Migrate</a> &nbsp;·&nbsp;
@@ -96,9 +102,11 @@ Spackle minimizes temporary objects and intermediate allocations, helping keep m
 
 Spackle was evaluated against core-js across **24 Chromium webviews (spanning 41 to 150)**.
 These tests isolate polyfill overhead and allow repeatable comparisons across legacy browser engines.
-In legacy environments Spackle generates **up to 7× less garbage** for the collector.
+In legacy environments Spackle generates **up to 6.6× less garbage** for the collector.
 
 On modern engines, Spackle steps aside and the two are level.
+
+Full method, results and raw data are in [the paper](https://spackle.samseabourn.com/paper/). To run the same checks and benchmarks on your own device, see [the website](https://spackle.samseabourn.com).
 
 The performance gap holds against both `core-js/stable` and the full bundle.
 

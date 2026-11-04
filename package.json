@@ -22,7 +22,7 @@
   ],
   "license": "MIT",
   "author": "Sam Seabourn",
-  "homepage": "https://github.com/shim-works/spackle#readme",
+  "homepage": "https://spackle.samseabourn.com",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/shim-works/spackle.git"
@@ -42,7 +42,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"
