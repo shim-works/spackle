@@ -107,12 +107,14 @@ const patchCollection = (proto: any, withMethods: boolean): void => {
   const iteratorKey = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
   const arrayValues = (Array.prototype as any).values;
   if (iteratorKey && (!proto[iteratorKey] || (arrayValues && arrayValues.__polyfilled === true && proto[iteratorKey] !== arrayValues))) {
-    Object.defineProperty(proto, iteratorKey, {
-      value: typeof arrayValues === 'function' ? arrayValues : (proto.values || domCollectionValues),
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
+    const value = typeof arrayValues === 'function' ? arrayValues : (proto.values || domCollectionValues);
+    // Chrome 42-45 ship some collections' @@iterator non-configurable: a throw
+    // here ended installPolyfills(). As core-js: define, else assign, else keep.
+    try {
+      Object.defineProperty(proto, iteratorKey, { value: value, writable: true, enumerable: false, configurable: true });
+    } catch (e) {
+      try { proto[iteratorKey] = value; } catch (e2) { /* locked: the native stays */ }
+    }
   }
 };
 
