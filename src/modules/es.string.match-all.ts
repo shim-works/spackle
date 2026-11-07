@@ -179,7 +179,27 @@ export const stringMatchAll = function matchAll(this: any, regexp: any): any {
   return regExpMatchAll(rx, s);
 };
 
+// RegExp.prototype[@@matchAll] itself, where the engine has none (core-js
+// es.string.match-all installs it too): regExpMatchAll above, as a method.
+export const regExpMatchAllMethod = function (this: any, string: any): any {
+  const R = this;
+  if (R === null || (typeof R !== "object" && typeof R !== "function")) {
+    throw new TypeError("RegExp.prototype[@@matchAll] called on a non-object");
+  }
+  // inlined: toStr(string)
+  if (typeof string === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+  return regExpMatchAll(R, typeof string === "string" ? string : String(string));
+};
+
 export const install = (): void => {
+  const matchAllKey = typeof Symbol !== "undefined" ? (Symbol as any).matchAll : undefined; // inlined: symbolKey("matchAll")
+  if (matchAllKey && typeof (RegExp.prototype as any)[matchAllKey] !== "function") {
+    try {
+      Object.defineProperty(RegExp.prototype, matchAllKey, { value: regExpMatchAllMethod, writable: true, enumerable: false, configurable: true });
+      try { Object.defineProperty(regExpMatchAllMethod, "name", { value: "[Symbol.matchAll]", configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+      Object.defineProperty(regExpMatchAllMethod, "__polyfilled", { value: true });
+    } catch (e) { /* locked-down RegExp.prototype */ }
+  }
   Object.defineProperty(String.prototype, "matchAll", {
     value: stringMatchAll as any,
     writable: true,

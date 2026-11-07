@@ -164,6 +164,56 @@ const nativeLengthGetter: any = typedArrayProto ? getterOf(typedArrayProto, 'len
 const nativeBufferGetter: any = typedArrayProto ? getterOf(typedArrayProto, 'buffer') : undefined;
 const detachedGetter: any = typeof ArrayBuffer !== 'undefined' ? getterOf(ArrayBuffer.prototype, 'detached') : undefined;
 
+/*
+ * Safari 7.1-9 have no %TypedArray%: the nine types sit straight on Object.
+ * As core-js: build one, reparent every type onto it, install the members there
+ * once. Probed on 7.1/8/9 (/typedarray-probe): native set/subarray/buffer, class
+ * strings and instanceof survive; index and lookup speed unchanged.
+ * This island only. Other islands read the shape at load, before install, and
+ * must never assume the synthesised one. A type that refuses the reparent keeps
+ * its own copies of every member, as before.
+ */
+let sharedTypedArray: any = typedArrayProto ? Object.getPrototypeOf(Int8Array) : undefined;
+const unparented: any[] = [];
+const synthesiseTypedArray = (): void => {
+  if (sharedTypedArray || typeof Int8Array === 'undefined') return;
+  const TypedArray: any = function TypedArray() {
+    throw new TypeError('Abstract class TypedArray not directly constructable');
+  };
+  try {
+    Object.defineProperty(TypedArray, 'name', { value: 'TypedArray', configurable: true });
+  } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  const proto = TypedArray.prototype;
+  let adopted = 0;
+  // the nine natives only: Float16Array is another island's
+  for (let i = 0; i < TA_NAMES.length - 1; i++) {
+    const C = intrinsicByName[TA_NAMES[i]];
+    if (!C) continue;
+    // __proto__, not setPrototypeOf: Safari 7.1-8 have no Object.setPrototypeOf
+    try {
+      C.prototype.__proto__ = proto;
+      C.__proto__ = TypedArray;
+    } catch (e) { /* refused: checked below */ }
+    if (Object.getPrototypeOf(C.prototype) === proto && Object.getPrototypeOf(C) === TypedArray) adopted++;
+    else unparented.push(C);
+  }
+  if (adopted) sharedTypedArray = TypedArray;
+};
+// core-js's exportTypedArrayMethod: a member replaced on the shared prototype
+// must not stay shadowed by an own native (old WebKit owns set per type).
+// Delete it; old WebKit has non-configurable ones, so assign as the fallback.
+const clearOwn = (name: string, value: any): void => {
+  for (let i = 0; i < TA_NAMES.length - 1; i++) {
+    const C = intrinsicByName[TA_NAMES[i]];
+    if (!C || !hasOwn.call(C.prototype, name)) continue;
+    try {
+      delete C.prototype[name];
+    } catch (e) {
+      try { C.prototype[name] = value; } catch (e2) { /* locked: the native stays */ }
+    }
+  }
+};
+
 // [[TypedArrayName]], or undefined for anything that is not a typed array.
 const typedArrayName = (O: any): string | undefined => {
   if (!isObject(O)) return undefined;
@@ -689,7 +739,7 @@ const installTypedArrayPolyfill = (): void => {
     // Where %TypedArray% exists the members belong on it (and every concrete
     // type, Float16Array included, inherits them); only engines without one get
     // a copy per concrete prototype.
-    const typedArrayTypesTargets: any[] = typedArrayProto ? [Object.getPrototypeOf(Int8Array)] : typedArrayTypes;
+    const typedArrayTypesTargets: any[] = sharedTypedArray ? [sharedTypedArray].concat(unparented) : typedArrayTypes;
     for (let i = 0; i < typedArrayTypesTargets.length; i++) {
       const TypedArray = typedArrayTypesTargets[i];
       if (!TypedArray) continue;
@@ -1073,7 +1123,7 @@ const installTypedArrayExtensionsOnNative = (): void => {
     // Where %TypedArray% exists the members belong on it (and every concrete
     // type, Float16Array included, inherits them); only engines without one get
     // a copy per concrete prototype.
-    const modernTypesTargets: any[] = typedArrayProto ? [Object.getPrototypeOf(Int8Array)] : modernTypes;
+    const modernTypesTargets: any[] = sharedTypedArray ? [sharedTypedArray].concat(unparented) : modernTypes;
     for (let i = 0; i < modernTypesTargets.length; i++) {
       const TypedArray = modernTypesTargets[i] as any;
       if (!TypedArray) continue;
@@ -1099,6 +1149,7 @@ const installTypedArrayExtensionsOnNative = (): void => {
         }
       }
       if (setIsBroken) {
+        if (TypedArray === sharedTypedArray) clearOwn("set", typedArraySet);
         Object.defineProperty(proto, "set", {
           value: typedArraySet,
           writable: true,
@@ -1118,6 +1169,7 @@ const installTypedArrayExtensionsOnNative = (): void => {
       for (let p = 0; p < patches.length; p++) {
         if (!patches[p][0]) continue;
         const name = patches[p][1];
+        if (TypedArray === sharedTypedArray) clearOwn(name, patches[p][2]);
         Object.defineProperty(proto, name, { value: patches[p][2], writable: true, enumerable: false, configurable: true });
         try {
           Object.defineProperty(proto[name], "name", { value: name, configurable: true });
@@ -1158,8 +1210,8 @@ const installTypedArrayExtensionsOnNative = (): void => {
 const unifyIterators = (): void => {
   const arrayValues = (Array.prototype as any).values;
   if (!arrayValues || arrayValues.__polyfilled !== true) return;
-  const targets: any[] = typedArrayProto
-    ? [typedArrayProto]
+  const targets: any[] = sharedTypedArray
+    ? [sharedTypedArray].concat(unparented).map(function (C: any) { return C.prototype; })
     : TA_NAMES.map(function (name: string) { return intrinsicByName[name] ? intrinsicByName[name].prototype : null; });
   const methods: [string, any][] = [['keys', typedArrayKeys], ['values', typedArrayValues], ['entries', typedArrayEntries]];
   for (let t = 0; t < targets.length; t++) {
@@ -1181,6 +1233,7 @@ const unifyIterators = (): void => {
 };
 
 export const installTypedArray = (): void => {
+  synthesiseTypedArray();
   installTypedArrayPolyfill();
   installTypedArrayExtensionsOnNative();
   unifyIterators();

@@ -65,12 +65,72 @@ const getIteratorPrototype = (): any => {
 
 const IteratorPrototype = getIteratorPrototype();
 
+/*
+ * core-js's es.iterator.* forced probes. Chrome's first native helpers
+ * (Chromium ~117-134) exist but don't close the receiver when the callback or
+ * limit is invalid, and take/drop accept limits past 2^53-1 (to 148). A broken
+ * helper is replaced; the native Iterator and its statics stay.
+ * Run once, at the first gate check or install.
+ */
+let brokenHelpers: any = null;
+const getBrokenHelpers = (): any => {
+  if (brokenHelpers) return brokenHelpers;
+  brokenHelpers = {};
+  const proto: any = IteratorPrototype;
+  const names = ["map", "filter", "take", "drop", "flatMap", "forEach", "reduce", "some", "every", "find"];
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const method = proto && proto[name];
+    if (typeof method !== "function") continue;
+    const limit = name === "take" || name === "drop";
+    // throws on an invalid iterator (crbug 336839115)
+    if (limit || name === "map" || name === "filter" || name === "flatMap") {
+      let threw = false;
+      try { method.call({ next: null }, name === "take" ? 1 : name === "drop" ? 0 : function () {}).next(); } catch (e) { threw = true; }
+      if (!threw) { brokenHelpers[name] = true; continue; }
+    }
+    // closes the receiver on an early error (tc39/ecma262#3467)
+    let closed = false;
+    try {
+      method.call({ next: function () { return { done: true }; }, "return": function () { closed = true; } }, -1);
+    } catch (e) {
+      if (!(e instanceof (limit ? RangeError : TypeError))) closed = false;
+    }
+    if (!closed) { brokenHelpers[name] = true; continue; }
+    if (limit) {
+      // a limit past MAX_SAFE_INTEGER is a RangeError
+      let ranged = false;
+      try { method.call({ next: function () { return { done: true }; } }, 0x20000000000000); } catch (e) { ranged = e instanceof RangeError; }
+      if (!ranged) brokenHelpers[name] = true;
+    }
+    if (name === "reduce") {
+      // an explicit undefined initial value is still an initial value (webkit 291651)
+      try { method.call([].keys(), function () {}, undefined); } catch (e) { brokenHelpers[name] = true; }
+    }
+  }
+  return brokenHelpers;
+};
+const anyHelperBroken = (): boolean => {
+  const broken = getBrokenHelpers();
+  for (const name in broken) if (broken[name]) return true;
+  return false;
+};
+
 export const isSupported = (): boolean => {
   try {
     // No Symbol.iterator: nothing to extend, so report supported.
     if (!iteratorSymbol || !IteratorPrototype) {
       return true;
     }
+    return helpersPresent() && !anyHelperBroken();
+  } catch {
+    return false;
+  }
+};
+
+// Every helper exists natively (broken or not).
+const helpersPresent = (): boolean => {
+  try {
     return (
       typeof (globalThis as any).Iterator === "function" &&
       typeof (IteratorPrototype as any).map === "function" &&
@@ -1029,6 +1089,47 @@ const installIteratorExtensionsOnNative = (): void => {
   }
 };
 
+// Missing helpers, and native ones core-js's probes call broken (getBrokenHelpers).
+const installHelpers = (): void => {
+  const methods: [string, Function][] = [
+    ["map", iteratorMap],
+    ["filter", iteratorFilter],
+    ["take", iteratorTake],
+    ["drop", iteratorDrop],
+    ["flatMap", iteratorFlatMap],
+    ["toArray", iteratorToArray],
+    ["forEach", iteratorForEach],
+    ["reduce", iteratorReduce],
+    ["some", iteratorSome],
+    ["every", iteratorEvery],
+    ["find", iteratorFind],
+  ];
+  for (let i = 0; i < methods.length; i++) {
+    const name = methods[i][0];
+    if (!(IteratorPrototype as any)[name] || getBrokenHelpers()[name]) {
+      try {
+        Object.defineProperty(methods[i][1], "name", {
+          value: name,
+          configurable: true,
+        });
+      } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
+      Object.defineProperty(IteratorPrototype as any, name, {
+        value: methods[i][1],
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
+      Object.defineProperty(
+        (IteratorPrototype as any)[name] as any,
+        "__polyfilled",
+        {
+          value: true,
+        },
+      );
+    }
+  }
+};
+
 const installIteratorPolyfill = (): void => {
   // core-js's es.iterator.constructor: whenever %IteratorPrototype% has no own
   // @@toStringTag, add it as the spec's accessor
@@ -1059,7 +1160,7 @@ const installIteratorPolyfill = (): void => {
       /* frozen %IteratorPrototype%: leave it untagged */
     }
   }
-  if (!isSupported() && IteratorPrototype) {
+  if (IteratorPrototype && iteratorSymbol && !helpersPresent()) {
     // Abstract: callable only as a subclass's super (NewTarget is not Iterator).
     const Iterator = function (this: any) {
       if (this === undefined || this === null || typeof this !== "object") {
@@ -1124,43 +1225,7 @@ const installIteratorPolyfill = (): void => {
       Object.defineProperty(statics[i][1], "__polyfilled", { value: true });
     }
 
-    const methods: [string, Function][] = [
-      ["map", iteratorMap],
-      ["filter", iteratorFilter],
-      ["take", iteratorTake],
-      ["drop", iteratorDrop],
-      ["flatMap", iteratorFlatMap],
-      ["toArray", iteratorToArray],
-      ["forEach", iteratorForEach],
-      ["reduce", iteratorReduce],
-      ["some", iteratorSome],
-      ["every", iteratorEvery],
-      ["find", iteratorFind],
-    ];
-    for (let i = 0; i < methods.length; i++) {
-      const name = methods[i][0];
-      if (!(IteratorPrototype as any)[name]) {
-        try {
-          Object.defineProperty(methods[i][1], "name", {
-            value: name,
-            configurable: true,
-          });
-        } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
-        Object.defineProperty(IteratorPrototype as any, name, {
-          value: methods[i][1],
-          writable: true,
-          enumerable: false,
-          configurable: true,
-        });
-        Object.defineProperty(
-          (IteratorPrototype as any)[name] as any,
-          "__polyfilled",
-          {
-            value: true,
-          },
-        );
-      }
-    }
+    installHelpers();
 
     const target: any = typeof window !== "undefined" ? window : globalThis;
     if (!target.Iterator) {
@@ -1178,6 +1243,8 @@ const installIteratorPolyfill = (): void => {
       } catch (e) { /* Function#name/length non-configurable pre-ES6 */ }
       Object.defineProperty(target.Iterator, "__polyfilled", { value: true });
     }
+  } else if (IteratorPrototype && anyHelperBroken()) {
+    installHelpers();
   }
 };
 

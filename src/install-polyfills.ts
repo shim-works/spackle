@@ -16,7 +16,7 @@ import { define } from './define.js';
 
 // Installed first in the function body: other islands use these constructors.
 import { isSupported as isObjectToStringSupported, install as installObjectToString } from './modules/es.object.to-string.js';
-import { isSupported as isAggregateErrorSupported, install as installAggregateError } from './modules/es.aggregate-error.js';
+import { install as installAggregateError } from './modules/es.aggregate-error.js';
 import { install as installMap } from './modules/es.map.js';
 import { install as installSet } from './modules/es.set.js';
 import { install as installWeakMap } from './modules/es.weak-map.js';
@@ -110,16 +110,16 @@ import { isSupported as isStringEndsWithSupported, stringEndsWith } from './modu
 import { isSupported as isStringFromCodePointSupported, stringFromCodePoint } from './modules/es.string.from-code-point.js';
 import { isSupported as isStringIncludesSupported, stringIncludes } from './modules/es.string.includes.js';
 import { isSupported as isStringIsWellFormedSupported, stringIsWellFormed } from './modules/es.string.is-well-formed.js';
-import { isSupported as isStringMatchSupported, stringMatch } from './modules/es.string.match.js';
+import { isSupported as isStringMatchSupported, stringMatch, installRegExpMatch } from './modules/es.string.match.js';
 import { isSupported as isStringMatchAllSupported, install as installStringMatchAll } from './modules/es.string.match-all.js';
 import { isSupported as isStringPadEndSupported, stringPadEnd } from './modules/es.string.pad-end.js';
 import { isSupported as isStringPadStartSupported, stringPadStart } from './modules/es.string.pad-start.js';
 import { isSupported as isStringRawSupported, stringRaw } from './modules/es.string.raw.js';
 import { isSupported as isStringRepeatSupported, stringRepeat } from './modules/es.string.repeat.js';
-import { isSupported as isStringReplaceSupported, stringReplace } from './modules/es.string.replace.js';
+import { isSupported as isStringReplaceSupported, stringReplace, installRegExpReplace } from './modules/es.string.replace.js';
 import { isSupported as isStringReplaceAllSupported, stringReplaceAll } from './modules/es.string.replace-all.js';
-import { isSupported as isStringSearchSupported, stringSearch } from './modules/es.string.search.js';
-import { isSupported as isStringSplitSupported, stringSplit } from './modules/es.string.split.js';
+import { isSupported as isStringSearchSupported, stringSearch, installRegExpSearch } from './modules/es.string.search.js';
+import { isSupported as isStringSplitSupported, stringSplit, installRegExpSplit } from './modules/es.string.split.js';
 import { isSupported as isStringStartsWithSupported, stringStartsWith } from './modules/es.string.starts-with.js';
 import { isSupported as isStringToWellFormedSupported, stringToWellFormed } from './modules/es.string.to-well-formed.js';
 import { isSupported as isStringTrimSupported, stringTrim } from './modules/es.string.trim.js';
@@ -197,7 +197,8 @@ export const installPolyfills = (): void => {
   // WeakMap, install-set-methods reads Set, es.promise.any constructs an
   // AggregateError, web.url parses with URLSearchParams.
   if (!isObjectToStringSupported()) installObjectToString();
-  if (!isAggregateErrorSupported()) installAggregateError();
+  // progressive: the polyfill where missing, a cause-aware wrapper on Chrome 85-92
+  installAggregateError();
   // Gated inside: replaces an unfit native, else patches its -0 handling.
   installMap();
   installSet();
@@ -315,16 +316,28 @@ export const installPolyfills = (): void => {
   if (!isStringFromCodePointSupported()) define(String, 'fromCodePoint', stringFromCodePoint);
   if (!isStringIncludesSupported()) define(String.prototype, 'includes', stringIncludes);
   if (!isStringIsWellFormedSupported()) define(String.prototype, 'isWellFormed', stringIsWellFormed);
-  if (!isStringMatchSupported()) define(String.prototype, 'match', stringMatch);
+  if (!isStringMatchSupported()) {
+    define(String.prototype, 'match', stringMatch);
+    installRegExpMatch();
+  }
   if (!isStringMatchAllSupported()) installStringMatchAll();
   if (!isStringPadEndSupported()) define(String.prototype, 'padEnd', stringPadEnd);
   if (!isStringPadStartSupported()) define(String.prototype, 'padStart', stringPadStart);
   if (!isStringRawSupported()) define(String, 'raw', stringRaw);
   if (!isStringRepeatSupported()) define(String.prototype, 'repeat', stringRepeat);
-  if (!isStringReplaceSupported()) define(String.prototype, 'replace', stringReplace);
+  if (!isStringReplaceSupported()) {
+    define(String.prototype, 'replace', stringReplace);
+    installRegExpReplace();
+  }
   if (!isStringReplaceAllSupported()) define(String.prototype, 'replaceAll', stringReplaceAll);
-  if (!isStringSearchSupported()) define(String.prototype, 'search', stringSearch);
-  if (!isStringSplitSupported()) define(String.prototype, 'split', stringSplit);
+  if (!isStringSearchSupported()) {
+    define(String.prototype, 'search', stringSearch);
+    installRegExpSearch();
+  }
+  if (!isStringSplitSupported()) {
+    define(String.prototype, 'split', stringSplit);
+    installRegExpSplit();
+  }
   if (!isStringStartsWithSupported()) define(String.prototype, 'startsWith', stringStartsWith);
   if (!isStringToWellFormedSupported()) define(String.prototype, 'toWellFormed', stringToWellFormed);
   if (!isStringTrimSupported()) define(String.prototype, 'trim', stringTrim);

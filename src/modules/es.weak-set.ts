@@ -1,4 +1,5 @@
 // Existence-only: the island rides on whichever WeakMap is live.
+import { define } from '../define.js';
 export const isSupported = (): boolean => {
   try {
     // Read the global: the bare name `WeakSet` resolves to this module's own polyfill.
@@ -167,12 +168,89 @@ if (typeof Symbol !== 'undefined' && (Symbol as any).toStringTag) {
   Object.defineProperty(WeakSet.prototype, (Symbol as any).toStringTag, { value: 'WeakSet', writable: false, enumerable: false, configurable: true });
 }
 
+/*
+ * core-js ACCEPT_ITERABLES on a kept native: Chrome < 51's WeakSet doesn't close
+ * the iterator when an item is rejected. Then construction goes through a
+ * wrapper (as es.map's); the native's storage and methods stay.
+ */
+const nativeClosesIteratorWeakSet = (Native: any): boolean => {
+  const key = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+  if (typeof key !== 'symbol') return true; // nothing else is iterable here
+  let closed = false;
+  let steps = 0;
+  const bad: any = {};
+  bad[key] = function () {
+    return {
+      // one rejected item, then done: a native that accepts it can't loop forever
+      next: function () { return steps++ ? { done: true, value: undefined } : { done: false, value: 1 }; },
+      'return': function () { closed = true; return {}; },
+    };
+  };
+  try {
+    new Native(bad);
+  } catch (e) {
+    return closed;
+  }
+  return true; // accepted 1: nothing this check can say
+};
+
+const wrapNativeWeakSet = (Native: any): void => {
+  const proto = Native.prototype;
+  const getProto = Object.getPrototypeOf;
+  const Wrapped: any = function (this: any) {
+    if (!(this instanceof Wrapped)) throw new TypeError("Constructor WeakSet requires 'new'");
+    const that = new Native();
+    const own = getProto(this);
+    if (own !== proto) {
+      if (typeof Object.setPrototypeOf === 'function') Object.setPrototypeOf(that, own);
+      else that.__proto__ = own;
+    }
+    const iterable = arguments.length > 0 ? arguments[0] : undefined;
+    if (iterable === null || iterable === undefined) return that;
+    // Get(set, "add") happens for every iterable, even an empty one
+    const adder = that.add;
+    if (typeof adder !== 'function') throw new TypeError('WeakSet constructor: this.add is not a function');
+    const method = iterable[(Symbol as any).iterator];
+    if (typeof method !== 'function') throw new TypeError('WeakSet constructor argument is not iterable');
+    const iterator = method.call(iterable);
+    if (iterator === null || (typeof iterator !== 'object' && typeof iterator !== 'function')) {
+      throw new TypeError('Result of the Symbol.iterator method is not an object');
+    }
+    // GetIteratorDirect reads next once; errors from next/done/value never close
+    const next = iterator.next;
+    for (;;) {
+      const step = next.call(iterator);
+      if (step === null || (typeof step !== 'object' && typeof step !== 'function')) {
+        throw new TypeError('Iterator result is not an object');
+      }
+      if (step.done) return that;
+      const item = step.value;
+      try {
+        adder.call(that, item);
+      } catch (error) {
+        try {
+          const ret = iterator['return'];
+          if (ret !== undefined && ret !== null) ret.call(iterator);
+        } catch (e) { /* the original error wins */ }
+        throw error;
+      }
+    }
+  };
+  try { Object.defineProperty(Wrapped, 'name', { value: 'WeakSet', configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+  Wrapped.prototype = proto;
+  Object.defineProperty(proto, 'constructor', { value: Wrapped, writable: true, enumerable: false, configurable: true });
+  (window as any).WeakSet = null;
+  delete (window as any).WeakSet;
+  define((window as any), 'WeakSet', Wrapped);
+};
+
 // core-js setToStringTag on a kept native (Chrome 38-48, Safari 9)
 export const tagNativeWeakSet = (): void => {
   const Native = (window as any).WeakSet;
   const tag = typeof Symbol !== 'undefined' ? (Symbol as any).toStringTag : undefined;
-  if (!tag || typeof Native !== 'function' || Native === WeakSet) return;
-  try {
+  if (typeof Native !== 'function' || Native === WeakSet) return;
+  if (tag) try {
     if (!Object.prototype.hasOwnProperty.call(Native.prototype, tag)) Object.defineProperty(Native.prototype, tag, { value: 'WeakSet', writable: false, enumerable: false, configurable: true });
   } catch (e) { /* locked-down prototype */ }
+  if (!nativeClosesIteratorWeakSet(Native)) wrapNativeWeakSet(Native);
 };

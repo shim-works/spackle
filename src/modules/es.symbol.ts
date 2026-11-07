@@ -196,7 +196,7 @@ export const hideSymbolKeys = (): void => {
       if (target === null || target === undefined) {
         throw new TypeError('Cannot convert undefined or null to object');
       }
-      const to = Object(target);
+      const to = toObject(target);
       // A String target's indices are read-only; old engines ignore the write
       const stringLength = typeof target === 'string' ? target.length : -1;
       for (let i = 1; i < arguments.length; i++) {
@@ -204,7 +204,7 @@ export const hideSymbolKeys = (): void => {
         // A primitive source contributes its boxed own keys and must never
         // abort the sources that follow it.
         if (source === null || source === undefined) continue;
-        const from = Object(source);
+        const from = toObject(source);
         // every own key, '@@' symbol keys included, each checked for
         // enumerability just before it is copied
         const keys = nativeNames(from);

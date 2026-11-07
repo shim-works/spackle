@@ -182,13 +182,17 @@ export const install = (): void => {
       // core-js's iterator-define: values is the native @@iterator, so both hand
       // out the engine's own %ArrayIteratorPrototype%. Its name can't be changed
       // on Chrome < 43, so where it isn't 'values', both get a named wrapper.
-      // Not `const values`: esbuild would rename the inner function to values2.
+      // A method shorthand: esbuild renames a `function values` expression
+      // (values4 in the bundle) but never a property key, and swc lowers this to
+      // `values: function values()`.
       const valuesMethod =
         nativeIterator.name === "values"
           ? nativeIterator
-          : function values(this: any) {
-              return nativeIterator.call(this);
-            };
+          : {
+              values(this: any) {
+                return nativeIterator.call(this);
+              },
+            }.values;
       Object.defineProperty(Array.prototype, "values", {
         value: valuesMethod,
         writable: true,

@@ -66,7 +66,8 @@ const runNext = (): void => {
 // Created on first use, so importing this module stays side-effect free.
 const makePost = (): (() => void) => {
   const w: any = window;
-  if (typeof w.MessageChannel === 'function') {
+  // present, not typeof 'function': Safari 7.1-9's host constructors are typeof 'object'
+  if (w.MessageChannel && (typeof w.MessageChannel === 'function' || typeof w.MessageChannel === 'object')) {
     const channel = new w.MessageChannel();
     channel.port1.onmessage = runNext;
     return function (): void {

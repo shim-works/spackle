@@ -10,7 +10,17 @@ export const isSupported = (): boolean => {
     probe[symbol] = function () {
       return 7;
     };
-    return ('' as any).match(probe) === 7;
+    if (('' as any).match(probe) !== 7) return false;
+    // core-js DELEGATES_TO_EXEC: the RegExp's own @@match must go through exec
+    // (Chrome 50's doesn't, and its native match reads @@match off primitives)
+    let execCalled = false;
+    const re: any = /a/;
+    re.exec = function () {
+      execCalled = true;
+      return null;
+    };
+    re[symbol]('');
+    return execCalled;
   } catch {
     return false;
   }
@@ -19,6 +29,7 @@ export const isSupported = (): boolean => {
 /** Spec: https://tc39.es/ecma262/#sec-string.prototype.match */
 
 const nativeMatch = String.prototype.match;
+const objectToStringS = Object.prototype.toString;
 
 export const stringMatch = function match(this: any, matcher: any): any {
   if (this === null || this === undefined) {
@@ -34,6 +45,96 @@ export const stringMatch = function match(this: any, matcher: any): any {
       return handler.call(matcher, this);
     }
   }
+  // RegExpCreate(ToString(matcher)) for anything @@match didn't take: a primitive
+  // (the native reads @@match off its prototype on Chrome 50) or an object whose
+  // @@match is null. A real RegExp goes as it is: no copy per call.
+  if (matcher === null || (typeof matcher !== 'object' && typeof matcher !== 'function') || objectToStringS.call(matcher) !== '[object RegExp]') {
+    if (typeof matcher === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+    matcher = new RegExp(matcher === undefined ? '' : String(matcher));
+  }
   return nativeMatch.call(this, matcher);
 };
 
+/*
+ * RegExp.prototype[@@match] (core-js fix-regexp-well-known-symbol-logic): installed
+ * with String.prototype.match wherever the gate above fails. A regexp whose exec
+ * is untouched goes straight to the engine; only an overridden exec (or a
+ * sticky-emulated instance) takes the spec algorithm, which calls exec.
+ */
+const regExpExecAtLoad = RegExp.prototype.exec;
+const objectToStringR = Object.prototype.toString;
+const symbolKeyMatch: any = typeof Symbol !== 'undefined' ? (Symbol as any).match : undefined;
+// the engine's own @@match, when it has one (Chrome 50+, Safari 10+)
+const nativeRegExpMatch: any = symbolKeyMatch ? (RegExp.prototype as any)[symbolKeyMatch] : undefined;
+
+// ToString: String(symbol) returns "Symbol(...)"; the spec throws
+const toStrMatch = (value: any): string => {
+  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  return typeof value === 'string' ? value : String(value);
+};
+
+// RegExpExec: a callable exec wins and must return an object or null
+const regExpExecMatch = (R: any, S: string): any => {
+  const exec = R.exec;
+  if (typeof exec === 'function') {
+    const result = exec.call(R, S);
+    if (result !== null && typeof result !== 'object' && typeof result !== 'function') {
+      throw new TypeError('RegExp exec method returned something other than an Object or null');
+    }
+    return result;
+  }
+  if (objectToStringR.call(R) !== '[object RegExp]') throw new TypeError('RegExp#exec called on incompatible receiver');
+  return regExpExecAtLoad.call(R, S);
+};
+
+const toLengthMatch = (value: any): number => {
+  let n = +value; // +x, not Number(x)
+  n = n !== n || n <= 0 ? 0 : Math.floor(n);
+  return n > 9007199254740991 ? 9007199254740991 : n;
+};
+
+// AdvanceStringIndex: a surrogate pair is one step under u / v
+const advanceMatch = (S: string, index: number, unicode: boolean): number => {
+  if (!unicode || index + 1 >= S.length) return index + 1;
+  const c = S.charCodeAt(index);
+  if (c < 0xd800 || c > 0xdbff) return index + 1;
+  const d = S.charCodeAt(index + 1);
+  return d < 0xdc00 || d > 0xdfff ? index + 1 : index + 2;
+};
+
+export const regExpMatch = function (this: any, string: any): any {
+  const rx = this;
+  if (rx === null || (typeof rx !== 'object' && typeof rx !== 'function')) {
+    throw new TypeError('RegExp.prototype[@@match] called on a non-object');
+  }
+  // inlined: toStrMatch(string)
+  if (typeof string === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  const S = typeof string === 'string' ? string : String(string);
+  // inlined: execUntouchedMatch(rx)
+  const exec = rx.exec;
+  if (exec === regExpExecAtLoad || exec === RegExp.prototype.exec) {
+    return nativeRegExpMatch ? nativeRegExpMatch.call(rx, S) : nativeMatch.call(S, rx);
+  }
+  const flags = toStrMatch(rx.flags);
+  if (flags.indexOf('g') === -1) return regExpExecMatch(rx, S);
+  const fullUnicode = flags.indexOf('u') !== -1 || flags.indexOf('v') !== -1;
+  rx.lastIndex = 0;
+  const A: string[] = [];
+  let n = 0;
+  for (;;) {
+    const result = regExpExecMatch(rx, S);
+    if (result === null) return n === 0 ? null : A;
+    const matchStr = toStrMatch(result[0]);
+    A[n++] = matchStr;
+    if (matchStr === '') rx.lastIndex = advanceMatch(S, toLengthMatch(rx.lastIndex), fullUnicode);
+  }
+};
+
+export const installRegExpMatch = (): void => {
+  if (!symbolKeyMatch) return;
+  try {
+    Object.defineProperty(RegExp.prototype, symbolKeyMatch, { value: regExpMatch, writable: true, enumerable: false, configurable: true });
+    try { Object.defineProperty(regExpMatch, 'name', { value: '[Symbol.match]', configurable: true }); } catch (e) { /* Function#name non-configurable pre-ES6 */ }
+    Object.defineProperty(regExpMatch, '__polyfilled', { value: true });
+  } catch (e) { /* locked-down RegExp.prototype: the native stays */ }
+};

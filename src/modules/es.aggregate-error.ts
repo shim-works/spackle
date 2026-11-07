@@ -132,5 +132,36 @@ Object.defineProperty(AggregateError, 'prototype', { writable: false, enumerable
 
 // Self-installs on import: other islands capture this constructor at module scope.
 export const install = (): void => {
-  define(window, 'AggregateError', AggregateError);
+  if (!isSupported()) {
+    define(window, 'AggregateError', AggregateError);
+    return;
+  }
+  // core-js es.aggregate-error.cause, patched on top: Chrome 85-92's native ignores
+  // options.cause. Wrap it sharing the native prototype, so the errors the native
+  // Promise.any rejects with still pass instanceof.
+  const Native = (window as any).AggregateError;
+  try {
+    if (new Native([1], 'm', { cause: 7 }).cause === 7) return;
+  } catch (e) { /* treat as missing cause */ }
+  const Wrapped: any = function (this: any, errors: any, message: any) {
+    const error = message === undefined ? new Native(errors) : new Native(errors, message);
+    const options = arguments.length > 2 ? arguments[2] : undefined;
+    // InstallErrorCause
+    if (options !== null && typeof options === 'object' && 'cause' in options) {
+      CAUSE.value = options.cause;
+      Object.defineProperty(error, 'cause', CAUSE);
+      CAUSE.value = undefined; // never pin the last cause
+    }
+    // a subclass's own prototype (core-js inheritIfRequired)
+    if (this instanceof Wrapped && this.constructor !== Wrapped) Object.setPrototypeOf(error, Object.getPrototypeOf(this));
+    return error;
+  };
+  Wrapped.prototype = Native.prototype;
+  Object.setPrototypeOf(Wrapped, Object.getPrototypeOf(Native));
+  try { Object.defineProperty(Wrapped, 'name', { value: 'AggregateError', configurable: true }); } catch (e) { /* not configurable */ }
+  Object.defineProperty(Native.prototype, 'constructor', { value: Wrapped, writable: true, enumerable: false, configurable: true });
+  define(window, 'AggregateError', Wrapped);
 };
+
+// Reused descriptor: no allocation per call.
+const CAUSE: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };

@@ -19,8 +19,11 @@ export const isSupported = (): boolean => {
       }
     }
     // core-js's es.array.sort probes: undefined is accepted, null is refused
-    // (V8), and a null receiver throws (old WebKit's sort was not strict)
-    const test = [1, 2, 3];
+    // (V8), and a null receiver throws (old WebKit's sort was not strict).
+    // On an EMPTY array, as core-js: Safari 10 only checks the comparator once
+    // there are two elements, so [1,2,3].sort(null) throws there but [].sort(null)
+    // doesn't, and the spec checks it first, whatever the length.
+    const test: any[] = [];
     test.sort(undefined);
     try {
       test.sort(null as any);

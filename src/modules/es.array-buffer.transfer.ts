@@ -122,13 +122,17 @@ const resolveDetacher = (): Detacher => {
 
   try {
     const Channel = host.MessageChannel;
-    if (typeof Channel === 'function') {
+    // Present, not typeof 'function': Safari 7.1-9's host constructors report
+    // typeof 'object' (core-js only checks the global exists). And byteLength is
+    // read before the ports close, as core-js's detach-transferable reads it.
+    if (Channel && (typeof Channel === 'function' || typeof Channel === 'object')) {
       const probe = new ArrayBuffer(2);
       const channel = new Channel();
       channel.port1.postMessage(null, [probe]);
+      const detached = probe.byteLength === 0;
       closePorts(channel);
 
-      if (probe.byteLength === 0) {
+      if (detached) {
         // A channel per call, closed before returning: transfer() is rare, so don't
         // hold one for the life of the page.
         return function (buffer: any): void {
