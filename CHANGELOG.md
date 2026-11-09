@@ -2,6 +2,18 @@
 
 All notable changes to `@shim-works/spackle`. Spackle is in alpha: anything may change between releases.
 
+## [Unreleased]
+
+### Fixed
+- Install no longer stops on Chrome 42–45, where some DOM collections ship a non-configurable `@@iterator`.
+- Safari 7.1–9 now get a shared `%TypedArray%`: the nine typed array types inherit from it, and every method is installed on it once, as on modern engines and in core-js.
+- `ArrayBuffer.prototype.transfer` and `setImmediate` now find `MessageChannel` on Safari 7.1–9 (it reports `typeof 'object'` there), so transfer really detaches and setImmediate takes the fast path.
+- `RegExp.prototype[@@search/@@match/@@replace/@@split/@@matchAll]` are installed where missing or broken, with core-js's probes (overridden `exec`, named groups, `$0`, `split` species and sticky bugs).
+- Iterator helpers, `WeakMap`/`WeakSet` iterable constructors, `AggregateError` `cause`, `Array.prototype.sort` (Safari 10) and `Object.assign` on the Safari 7.1 `Symbol` shim now match core-js's checks.
+
+### Changed
+- Spackle now aims to match core-js compliance. On the 1,357-check verify suite there is no check core-js passes that Spackle fails, on Chrome 38–39, Chromium 41–150 and Safari 7.1–11.
+
 ## [0.1.0-alpha.10] - 2026-11-04
 
 ### Changed

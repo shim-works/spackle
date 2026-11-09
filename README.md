@@ -245,8 +245,8 @@ legacy({
 | **Status** | Alpha. The API is stable (one import, no config); internals are still being tuned. |
 | **Targets** | Chrome 38+ and Safari 7.1+, including the webviews in smart TVs and set-top boxes. |
 | **Coverage** | Matches or better than `core-js/stable`. Unfinished TC39 proposals from core-js's full bundle (like `Set.prototype.filter`) aren't included; use the standard Iterator helpers instead, e.g. `set.values().filter(fn)`. |
-| **Spec compliance** | On test262-derived tests run in real browsers, Spackle is as compliant as core-js or better. Neither is fully spec compliant. |
-| **Known gaps** | Safari 7.1 has some broken natives (being worked on).<br />`WeakMap` can't take frozen objects as keys. |
+| **Spec compliance** | Spackle aims to match core-js compliance. On 1,357 test262-derived checks run in real browsers (Chrome 38–39, every Chromium 41–150, Safari 7.1–11), there is no check core-js passes that Spackle fails, and Spackle fails fewer checks everywhere.<br />core-js isn't fully spec compliant either: on Safari 7.1 it fails 125 checks and freezes the page on 4; Spackle fails 24. |
+| **Known gaps** | Safari 7.1–9 have no native `Symbol`: checks that need a real symbol can't pass with any polyfill (core-js included).<br />`WeakMap` can't take frozen objects as keys. |
 
 <br />
 
