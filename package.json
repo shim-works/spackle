@@ -1,6 +1,6 @@
 {
   "name": "@shim-works/spackle",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-alpha.11",
   "description": "Runtime polyfills for slow hardware (smart TV, set-top box, kiosks, etc) — Chrome >= 38 / Safari >= 7.1, aiming for core-js compliance with far less garbage",
   "keywords": [
     "polyfill",
