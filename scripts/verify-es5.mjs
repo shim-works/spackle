@@ -57,9 +57,9 @@ const CHECKS = [
   [/\*\*/, 'exponentiation operator'],
 ];
 
-// Only the IIFE builds: dist/index.js and .mjs go to bundlers, which downlevel
-// with their own targets. Paths come from argv so build:bundle checks the file
-// it just wrote.
+// Paths come from argv: `npm run verify:es5` passes all three dist files (the
+// IIFE and the cjs/esm entry points, since bundlers often skip node_modules),
+// and build:bundle passes the file it just wrote.
 const FILES = process.argv.slice(2);
 if (FILES.length === 0) FILES.push('dist/index.global.js');
 let failures = 0;

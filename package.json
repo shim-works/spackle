@@ -49,14 +49,14 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && node scripts/downlevel-es5.mjs dist/index.global.js && npm run verify:es5",
+    "build": "tsup && node scripts/downlevel-es5.mjs dist/index.global.js dist/index.js dist/index.mjs && npm run verify:es5",
     "build:bundle": "tsup --config tsup.bundle.config.ts && node scripts/downlevel-es5.mjs spackle.js && node scripts/verify-es5.mjs spackle.js",
     "lint": "tsc && node scripts/check-source.mjs",
     "lint:tests": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test262": "node --max-old-space-size=3000 scripts/test262.mjs",
     "build:browser-tests": "node scripts/build-browser-tests.mjs",
-    "verify:es5": "node scripts/verify-es5.mjs",
+    "verify:es5": "node scripts/verify-es5.mjs dist/index.global.js dist/index.js dist/index.mjs",
     "release:alpha": "git diff --quiet HEAD && npm whoami && npm run lint && npm test && npm run build && npm version prerelease --preid alpha && git push --follow-tags && npm publish --tag alpha",
     "release": "git diff --quiet HEAD && npm whoami && npm run lint && npm test && npm run build && npm version patch && git push --follow-tags && npm publish"
   },

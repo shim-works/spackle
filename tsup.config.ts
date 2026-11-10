@@ -4,6 +4,8 @@ export default defineConfig([
   /*
    * cjs + esm for bundlers, one file per format. `sideEffects: true`: spackle
    * installs at runtime and gates each member itself, so there's nothing to split.
+   * `npm run build` lowers both to ES5 too: a bundler that skips node_modules
+   * would otherwise ship `const` and arrows to Chrome 38.
    */
   {
     entry: ['src/index.ts'],
