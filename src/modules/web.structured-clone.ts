@@ -77,6 +77,9 @@ const ERROR_NAMES: { [name: string]: boolean } = {
 // one descriptor for the island, never a literal per clone.
 const STACK: PropertyDescriptor = { value: undefined, writable: true, enumerable: false, configurable: true };
 
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const hasOwnOrInherited = (value: any, key: string): boolean => {
   try {
     return key in value;
@@ -85,8 +88,9 @@ const hasOwnOrInherited = (value: any, key: string): boolean => {
   }
 };
 
-const makeSeen = (): any => {
-  if (EngineMap) return new EngineMap();
+// Not inlined: only reached on an engine with no Map. Its closures capture locals,
+// and inlined they would make structuredClone allocate a context on every call.
+const makeSeenFallback = (): any => {
   const keys: any[] = [];
   const values: any[] = [];
   return {
@@ -313,5 +317,6 @@ const cloneValue = (value: any, seen: any): any => {
 
 export const structuredClone = function (value: any, _options?: any): any {
   if (arguments.length === 0) throw new TypeError("Failed to execute 'structuredClone' on 'Window': 1 argument required, but only 0 present.");
-  return cloneValue(value, makeSeen());
+  // inlined: makeSeen()
+  return cloneValue(value, EngineMap ? new EngineMap() : makeSeenFallback());
 };

@@ -78,6 +78,9 @@ const decodePercent = (str: string): string => {
 
 // The WHATWG UTF-8 decoder, run over percent-decoded bytes. Raw (unescaped)
 // characters end any pending byte sequence and pass through as themselves.
+// Not inlined: only reached on malformed input, and decodePercent holds a try/catch.
+// Its flush closure captures locals; inlined, decodePercent would allocate a context
+// on every call.
 const decodeLenient = (str: string): string => {
   let out = '';
   let needed = 0;

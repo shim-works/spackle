@@ -29,20 +29,6 @@ const floor = Math.floor;
 const pow = (x: number, n: number, acc: number): number =>
   n === 0 ? acc : n % 2 === 1 ? pow(x, n - 1, acc * x) : pow(x * x, n / 2, acc);
 
-const log = (x: number): number => {
-  let n = 0;
-  let x2 = x;
-  while (x2 >= 4096) {
-    n += 12;
-    x2 /= 4096;
-  }
-  while (x2 >= 2) {
-    n += 1;
-    x2 /= 2;
-  }
-  return n;
-};
-
 const multiply = (data: number[], n: number, c: number): void => {
   let index = -1;
   let c2 = c;
@@ -100,7 +86,18 @@ export const numberToFixed = function toFixed(this: any, fractionDigits?: any): 
     number = -number;
   }
   if (number > 1e-21) {
-    e = log(number * pow(2, 69, 1)) - 69;
+    // inlined: log(number * pow(2, 69, 1))
+    let x2 = number * pow(2, 69, 1);
+    e = 0;
+    while (x2 >= 4096) {
+      e += 12;
+      x2 /= 4096;
+    }
+    while (x2 >= 2) {
+      e += 1;
+      x2 /= 2;
+    }
+    e -= 69;
     z = e < 0 ? number * pow(2, -e, 1) : number / pow(2, e, 1);
     z *= 0x10000000000000;
     e = 52 - e;

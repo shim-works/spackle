@@ -19,6 +19,9 @@ export const isSupported = (): boolean => {
 // CanBeHeldWeakly, symbol half: registered symbols (Symbol.for) can never be
 // collected, so they're rejected. Object/function keys are decided inline at the
 // call site, keeping this try off the common path.
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const isRegisteredSymbol = (value: any): boolean => {
   if (typeof Symbol === 'undefined' || typeof (Symbol as any).keyFor !== 'function') return false;
   try {

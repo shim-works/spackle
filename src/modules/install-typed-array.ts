@@ -222,8 +222,9 @@ const typedArrayName = (O: any): string | undefined => {
   return nameByTag[objectToString.call(O)];
 };
 const lengthOf = (O: any): number => (nativeLengthGetter ? nativeLengthGetter.call(O) : O.length);
-const bufferOf = (O: any): any => (nativeBufferGetter ? nativeBufferGetter.call(O) : O.buffer);
-const isDetached = (O: any): boolean => !!(detachedGetter && detachedGetter.call(bufferOf(O)));
+// inlined: bufferOf(O)
+const isDetached = (O: any): boolean =>
+  !!(detachedGetter && detachedGetter.call(nativeBufferGetter ? nativeBufferGetter.call(O) : O.buffer));
 
 // ValidateTypedArray: a typed array whose buffer is not detached; returns its length.
 // Every method enters through here, so its helpers are inlined: one call, not six.

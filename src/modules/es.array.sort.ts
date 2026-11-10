@@ -60,17 +60,16 @@ export const isArraySortSupported = isSupported;
 // bottom-up merge sort: stable, one aux buffer, iterative so deep arrays
 // can't blow the stack. `<= 0` on the left keeps equal items in first-seen
 // order — the stability guarantee V8 didn't give until Chrome 70.
-// The user's comparefn rides along as an argument -- no per-call closure, and no
-// module state to restore, so arraySort needs no try/finally and a comparator
-// that sorts again (re-entrancy) still sees its own. Both comparisons are
-// inlined: through a function pointer, the call site saw two targets and the
-// engine could not inline either.
+// No module state, so arraySort needs no try/finally and a comparator that sorts
+// again (re-entrancy) still sees its own. Both comparisons are inlined: through
+// a function pointer, the call site saw two targets and the engine could not
+// inline either.
+// Merge sort over spec-internal lists: no index write on them may reach a setter
+// on Array.prototype or Object.prototype. Plain arrays when nothing sits at those
+// indices up the chain, null-prototype objects otherwise.
 
-/*
- * Merge sort over spec-internal lists: no index write on them may reach a setter
- * on Array.prototype or Object.prototype. Plain arrays when nothing sits at those
- * indices up the chain, null-prototype objects otherwise.
- */
+// Not inlined: one call per sort, so inlining saves nothing, and on its own this
+// stays small enough for Chrome 41 to optimise the compare/merge loop.
 const stableSort = (items: any, length: number, plain: boolean, comparefn: any): any => {
   if (length < 2) {
     return items;

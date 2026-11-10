@@ -23,10 +23,12 @@ const dataDesc: PropertyDescriptor = { value: undefined, writable: true, enumera
 // defineProperty, as the spec requires. core-js always pays for defineProperty.
 const ArrayProto = Array.prototype;
 
-// Bottom-up merge sort, inlined: stable (V8's sort wasn't until Chrome 70), one
-// aux buffer, no recursion. The lists are null-prototype objects: they are
-// spec-internal, so no write may reach a setter on Array/Object.prototype.
-// Returns whichever buffer holds the result.
+// Bottom-up merge sort: stable (V8's sort wasn't until Chrome 70), one aux buffer,
+// no recursion. The lists are null-prototype objects: they are spec-internal, so no
+// write may reach a setter on Array/Object.prototype. Returns whichever buffer
+// holds the result.
+// Not inlined: one call per sort, so inlining saves nothing, and on its own this
+// stays small enough for Chrome 41 to optimise the compare/merge loop.
 const stableSort = (items: any, length: number, compareFn: any): any => {
   if (length < 2) {
     return items;

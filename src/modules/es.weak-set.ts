@@ -30,6 +30,9 @@ const iteratorKey: any = typeof Symbol !== 'undefined' ? (Symbol as any).iterato
 const arrayIterAtLoad: any = iteratorKey ? (Array.prototype as any)[iteratorKey] : undefined;
 let counter = 0;
 
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const isRegisteredSymbol = (value: any): boolean => {
   try {
     return (Symbol as any).keyFor(value) !== undefined;
@@ -43,6 +46,9 @@ const symbolIndex = (self: any, value: any): number => {
   for (let i = 0; i < list.length; i++) if (list[i] === value) return i;
   return -1;
 };
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const closeIterator = (iterator: any): void => {
   try {
     const ret = iterator['return'];

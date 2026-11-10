@@ -16,28 +16,14 @@ export const isSupported = (): boolean => {
 const isObject = (value: any): boolean =>
   value !== null && (typeof value === 'object' || typeof value === 'function');
 const hasOwn = Object.prototype.hasOwnProperty;
-// IsConstructor, best ES5 approximation: ordinary and built-in constructors carry
-// an own prototype; bound functions are constructors without one.
-const isConstructor = (C: any): boolean =>
-  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
-
-/*
- * Built-in closures (resolve element functions, capability wrappers) are not
- * constructors and have no prototype. ES5 function expressions always are, so
- * where the engine parses arrows, wrap in one (length 1, name '').
- */
-let arrowWrap: any = null;
-try {
-  arrowWrap = new Function('f', 'return (x) => f(x)');
-} catch (e) {
-  /* no arrow syntax (or CSP): plain functions, the ES5 best */
-}
-const builtinClosure = (fn: (x: any) => any): any =>
-  arrowWrap ? arrowWrap(fn) : function (x: any) { return fn(x); };
 
 // NewPromiseCapability(C), with GetCapabilitiesExecutor's checks.
 const newPromiseCapability = (C: any): any => {
-  if (!isConstructor(C)) throw new TypeError('Promise capability: not a constructor');
+  // inlined: isConstructor(C) -- ordinary and built-in constructors carry an own
+  // prototype; bound functions are constructors without one
+  if (!(typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || '')))) {
+    throw new TypeError('Promise capability: not a constructor');
+  }
   const capability: any = { promise: undefined, resolve: undefined, reject: undefined };
   const executor = function (resolve: any, reject: any): void {
     if (capability.resolve !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');

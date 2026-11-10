@@ -447,6 +447,8 @@ if (iteratorSymbol) {
 // GetIteratorFlattenable (reject-strings): every primitive is rejected; a
 // defined but uncallable Symbol.iterator is a TypeError; only an absent one
 // falls back to treating the value as the iterator.
+// Not inlined: flatMap-only, once per outer element. Inlined it grows the next()
+// that every helper kind shares.
 const getInnerIterator = (value: any): any => {
   if (
     value === null ||

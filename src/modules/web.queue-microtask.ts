@@ -37,6 +37,9 @@ let scheduled = false;
 let fast: (() => void) | null = null;
 
 // The try kept out of drain's loop (old V8 won't optimise a function holding one).
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const runCallback = (callback: any): void => {
   try {
     callback();
@@ -68,41 +71,39 @@ const drain = (): void => {
   head = 0;
 };
 
-const wake = (): void => {
-  if (fast === null) {
-    const w: any = window;
-    const MO = w.MutationObserver || w.WebKitMutationObserver;
-    const ua = (w.navigator && w.navigator.userAgent) || '';
-    const brokenObserver =
-      /(?:ipad|iphone|ipod).*applewebkit/i.test(ua) || /web0s(?!.*chrome)/i.test(ua);
+// Not inlined: runs once, on first use. Its closures capture locals, and inlined
+// they would make queueMicrotask allocate a context on every call.
+const makeFast = (): void => {
+  const w: any = window;
+  const MO = w.MutationObserver || w.WebKitMutationObserver;
+  const ua = (w.navigator && w.navigator.userAgent) || '';
+  const brokenObserver =
+    /(?:ipad|iphone|ipod).*applewebkit/i.test(ua) || /web0s(?!.*chrome)/i.test(ua);
 
-    if (typeof nativeThen === 'function') {
-      // core-js's setup: resolve(undefined) (a bare resolve() throws on LG webOS
-      // 2), and an own constructor so the native then's species lookup stays on
-      // the native (iOS Safari 10.1; also skips spackle's proto splice).
-      const resolved = NativePromise.resolve(undefined);
-      resolved.constructor = NativePromise;
-      fast = function (): void {
-        nativeThen.call(resolved, drain);
-      };
-    } else if (MO && w.document && !brokenObserver) {
-      // Detached text node: flipping its data is the cheapest observable mutation.
-      let toggle = true;
-      const node = w.document.createTextNode('');
-      new MO(drain).observe(node, { characterData: true });
-      fast = function (): void {
-        toggle = !toggle;
-        node.data = toggle ? '1' : '0';
-      };
-    } else {
-      // Last-resort scheduler only, not a watchdog alongside a working fast path.
-      fast = function (): void {
-        setTimeout(drain, 0);
-      };
-    }
+  if (typeof nativeThen === 'function') {
+    // core-js's setup: resolve(undefined) (a bare resolve() throws on LG webOS
+    // 2), and an own constructor so the native then's species lookup stays on
+    // the native (iOS Safari 10.1; also skips spackle's proto splice).
+    const resolved = NativePromise.resolve(undefined);
+    resolved.constructor = NativePromise;
+    fast = function (): void {
+      nativeThen.call(resolved, drain);
+    };
+  } else if (MO && w.document && !brokenObserver) {
+    // Detached text node: flipping its data is the cheapest observable mutation.
+    let toggle = true;
+    const node = w.document.createTextNode('');
+    new MO(drain).observe(node, { characterData: true });
+    fast = function (): void {
+      toggle = !toggle;
+      node.data = toggle ? '1' : '0';
+    };
+  } else {
+    // Last-resort scheduler only, not a watchdog alongside a working fast path.
+    fast = function (): void {
+      setTimeout(drain, 0);
+    };
   }
-
-  fast();
 };
 
 export const queueMicrotask = function (callback: () => void): void {
@@ -114,5 +115,7 @@ export const queueMicrotask = function (callback: () => void): void {
     return;
   }
   scheduled = true;
-  wake();
+  // inlined: wake()
+  if (fast === null) makeFast();
+  (fast as any)();
 };

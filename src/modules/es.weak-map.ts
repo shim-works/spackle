@@ -58,6 +58,9 @@ const SLOT: PropertyDescriptor = { value: undefined, writable: true, enumerable:
 
 // CanBeHeldWeakly: an object, or a symbol that is not in the global registry.
 // The try stays in here, so set() calls this for symbols only.
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const isRegisteredSymbol = (value: any): boolean => {
   try {
     return (Symbol as any).keyFor(value) !== undefined;
@@ -79,6 +82,9 @@ const symbolIndex = (self: any, key: any): number => {
 };
 
 // IteratorClose after a per-item failure; a throwing return() must not mask the original.
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const closeIterator = (iterator: any): void => {
   try {
     const ret = iterator['return'];

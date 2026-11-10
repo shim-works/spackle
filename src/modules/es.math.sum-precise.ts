@@ -47,48 +47,6 @@ const normalize = (limbs: number[]): void => {
   }
 };
 
-/** Add |value| into the accumulator exactly. `value` must be finite and non-zero. */
-const addMagnitude = (limbs: number[], value: number): void => {
-  scratch!.setFloat64(0, Math.abs(value));
-  const hi = scratch!.getUint32(0);
-  const lo = scratch!.getUint32(4);
-  const biasedExp = (hi >>> 20) & 0x7ff;
-  const mantHi = hi & 0xfffff;
-
-  let mantissa: number;
-  let exp: number;
-  if (biasedExp === 0) {
-    mantissa = mantHi * 4294967296 + lo; // subnormal: no implicit leading 1
-    exp = -1074;
-  } else {
-    mantissa = (mantHi + 0x100000) * 4294967296 + lo;
-    exp = biasedExp - 1075;
-  }
-  if (mantissa === 0) return;
-
-  const bit = exp + BIAS; // >= 0 for every finite double
-  const limb = Math.floor(bit / LIMB_BITS);
-  const shift = bit % LIMB_BITS;
-  const scale = Math.pow(2, shift);
-
-  // split the 53-bit mantissa into 24-bit chunks so each chunk * 2^shift stays
-  // exactly representable
-  const c0 = mantissa % LIMB_BASE;
-  const c1 = Math.floor(mantissa / LIMB_BASE) % LIMB_BASE;
-  const c2 = Math.floor(mantissa / (LIMB_BASE * LIMB_BASE));
-
-  limbs[limb] += c0 * scale;
-  limbs[limb + 1] += c1 * scale;
-  if (c2 !== 0) limbs[limb + 2] += c2 * scale;
-};
-
-const compare = (a: number[], b: number[]): number => {
-  for (let i = LIMB_COUNT - 1; i >= 0; i--) {
-    if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
-  }
-  return 0;
-};
-
 /** a -= b, assuming a >= b and both normalized. */
 const subtract = (a: number[], b: number[]): void => {
   let borrow = 0;
@@ -102,16 +60,6 @@ const subtract = (a: number[], b: number[]): void => {
     }
     a[i] = v;
   }
-};
-
-/** 1 if any bit below `index` is set. Whole limbs first, so ~40 compares, not ~1000 pow() calls. */
-const anyBitBelow = (limbs: number[], index: number): number => {
-  const limb = Math.floor(index / LIMB_BITS);
-  for (let i = 0; i < limb && i < LIMB_COUNT; i++) {
-    if (limbs[i] !== 0) return 1;
-  }
-  if (limb < LIMB_COUNT && limbs[limb] % Math.pow(2, index % LIMB_BITS) !== 0) return 1;
-  return 0;
 };
 
 const bitAt = (limbs: number[], index: number): number => {
@@ -146,7 +94,19 @@ const toDouble = (limbs: number[]): number => {
   let exp = low - BIAS;
   if (low > 0) {
     const roundBit = bitAt(limbs, low - 1);
-    const sticky = anyBitBelow(limbs, low - 1);
+    // inlined: anyBitBelow(limbs, low - 1) -- whole limbs first, so ~40 compares, not ~1000 pow() calls
+    let sticky = 0;
+    const stickyIndex = low - 1;
+    const stickyLimb = Math.floor(stickyIndex / LIMB_BITS);
+    for (let i = 0; i < stickyLimb && i < LIMB_COUNT; i++) {
+      if (limbs[i] !== 0) {
+        sticky = 1;
+        break;
+      }
+    }
+    if (sticky === 0 && stickyLimb < LIMB_COUNT && limbs[stickyLimb] % Math.pow(2, stickyIndex % LIMB_BITS) !== 0) {
+      sticky = 1;
+    }
     if (roundBit === 1 && (sticky === 1 || mantissa % 2 === 1)) {
       mantissa += 1;
       if (mantissa === 9007199254740992) {
@@ -205,6 +165,20 @@ export const mathSumPrecise = function (items: any): number {
   return result;
 };
 
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
+const closeQuietly = (iterator: any): void => {
+  try {
+    const ret = iterator.return;
+    if (typeof ret === 'function') ret.call(iterator);
+  } catch {
+    /* the TypeError that follows is what matters */
+  }
+};
+
+// Not inlined: its caller holds a try/catch, and Chrome 41 (Crankshaft) won't optimise
+// a function containing one, so this loop has to live outside it.
 const sumInto = (items: any, iteratorKey: any, positive: number[], negative: number[]): number => {
   let count = 0;
   let sinceNormalize = 0;
@@ -223,12 +197,7 @@ const sumInto = (items: any, iteratorKey: any, positive: number[], negative: num
     if (typeof value !== 'number') {
       // spec closes the iterator before propagating, and must not coerce the
       // offending value -- so no String(value) anywhere in this path
-      try {
-        const ret = iterator.return;
-        if (typeof ret === 'function') ret.call(iterator);
-      } catch {
-        /* the TypeError below is what matters */
-      }
+      closeQuietly(iterator);
       throw new TypeError('Math.sumPrecise: every element must be a Number');
     }
 
@@ -255,7 +224,40 @@ const sumInto = (items: any, iteratorKey: any, positive: number[], negative: num
     }
 
     allMinusZero = false;
-    addMagnitude(value > 0 ? positive : negative, value);
+    // inlined: addMagnitude(value > 0 ? positive : negative, value) -- add |value|
+    // into the accumulator exactly
+    const limbs = value > 0 ? positive : negative;
+    scratch!.setFloat64(0, Math.abs(value));
+    const hi = scratch!.getUint32(0);
+    const lo = scratch!.getUint32(4);
+    const biasedExp = (hi >>> 20) & 0x7ff;
+    const mantHi = hi & 0xfffff;
+
+    let mantissa: number;
+    let exp: number;
+    if (biasedExp === 0) {
+      mantissa = mantHi * 4294967296 + lo; // subnormal: no implicit leading 1
+      exp = -1074;
+    } else {
+      mantissa = (mantHi + 0x100000) * 4294967296 + lo;
+      exp = biasedExp - 1075;
+    }
+    if (mantissa !== 0) {
+      const bit = exp + BIAS; // >= 0 for every finite double
+      const limb = Math.floor(bit / LIMB_BITS);
+      const shift = bit % LIMB_BITS;
+      const scale = Math.pow(2, shift);
+
+      // split the 53-bit mantissa into 24-bit chunks so each chunk * 2^shift stays
+      // exactly representable
+      const c0 = mantissa % LIMB_BASE;
+      const c1 = Math.floor(mantissa / LIMB_BASE) % LIMB_BASE;
+      const c2 = Math.floor(mantissa / (LIMB_BASE * LIMB_BASE));
+
+      limbs[limb] += c0 * scale;
+      limbs[limb + 1] += c1 * scale;
+      if (c2 !== 0) limbs[limb + 2] += c2 * scale;
+    }
     // each add can push a limb up by < 2^47, so normalize well before the
     // exact-integer limit at 2^53
     if (++sinceNormalize >= 32) {
@@ -274,7 +276,14 @@ const sumInto = (items: any, iteratorKey: any, positive: number[], negative: num
   normalize(positive);
   normalize(negative);
 
-  const order = compare(positive, negative);
+  // inlined: compare(positive, negative)
+  let order = 0;
+  for (let i = LIMB_COUNT - 1; i >= 0; i--) {
+    if (positive[i] !== negative[i]) {
+      order = positive[i] > negative[i] ? 1 : -1;
+      break;
+    }
+  }
   if (order === 0) return 0;
   if (order > 0) {
     subtract(positive, negative);
@@ -283,4 +292,3 @@ const sumInto = (items: any, iteratorKey: any, positive: number[], negative: num
   subtract(negative, positive);
   return -toDouble(negative);
 };
-

@@ -87,21 +87,6 @@ const regExpExecMatch = (R: any, S: string): any => {
   return regExpExecAtLoad.call(R, S);
 };
 
-const toLengthMatch = (value: any): number => {
-  let n = +value; // +x, not Number(x)
-  n = n !== n || n <= 0 ? 0 : Math.floor(n);
-  return n > 9007199254740991 ? 9007199254740991 : n;
-};
-
-// AdvanceStringIndex: a surrogate pair is one step under u / v
-const advanceMatch = (S: string, index: number, unicode: boolean): number => {
-  if (!unicode || index + 1 >= S.length) return index + 1;
-  const c = S.charCodeAt(index);
-  if (c < 0xd800 || c > 0xdbff) return index + 1;
-  const d = S.charCodeAt(index + 1);
-  return d < 0xdc00 || d > 0xdfff ? index + 1 : index + 2;
-};
-
 export const regExpMatch = function (this: any, string: any): any {
   const rx = this;
   if (rx === null || (typeof rx !== 'object' && typeof rx !== 'function')) {
@@ -126,7 +111,26 @@ export const regExpMatch = function (this: any, string: any): any {
     if (result === null) return n === 0 ? null : A;
     const matchStr = toStrMatch(result[0]);
     A[n++] = matchStr;
-    if (matchStr === '') rx.lastIndex = advanceMatch(S, toLengthMatch(rx.lastIndex), fullUnicode);
+    if (matchStr === '') {
+      // inlined: toLengthMatch(rx.lastIndex)
+      let thisIndex = +rx.lastIndex; // +x, not Number(x)
+      thisIndex = thisIndex !== thisIndex || thisIndex <= 0 ? 0 : Math.floor(thisIndex);
+      if (thisIndex > 9007199254740991) {
+        thisIndex = 9007199254740991;
+      }
+      // inlined: advanceMatch(S, thisIndex, fullUnicode) -- a surrogate pair is one step under u / v
+      let nextIndex = thisIndex + 1;
+      if (fullUnicode && thisIndex + 1 < S.length) {
+        const c = S.charCodeAt(thisIndex);
+        if (c >= 0xd800 && c <= 0xdbff) {
+          const d = S.charCodeAt(thisIndex + 1);
+          if (d >= 0xdc00 && d <= 0xdfff) {
+            nextIndex = thisIndex + 2;
+          }
+        }
+      }
+      rx.lastIndex = nextIndex;
+    }
   }
 };
 

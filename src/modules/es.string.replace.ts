@@ -91,32 +91,10 @@ const toStrReplace = (value: any): string => {
 };
 
 // RegExpExec: a callable exec wins and must return an object or null
-const regExpExecReplace = (R: any, S: string): any => {
-  const exec = R.exec;
-  if (typeof exec === 'function') {
-    const result = exec.call(R, S);
-    if (result !== null && typeof result !== 'object' && typeof result !== 'function') {
-      throw new TypeError('RegExp exec method returned something other than an Object or null');
-    }
-    return result;
-  }
-  if (objectToStringR.call(R) !== '[object RegExp]') throw new TypeError('RegExp#exec called on incompatible receiver');
-  return regExpExecAtLoad.call(R, S);
-};
-
 const toLengthReplace = (value: any): number => {
   let n = +value; // +x, not Number(x)
   n = n !== n || n <= 0 ? 0 : Math.floor(n);
   return n > 9007199254740991 ? 9007199254740991 : n;
-};
-
-// AdvanceStringIndex: a surrogate pair is one step under u / v
-const advanceReplace = (S: string, index: number, unicode: boolean): number => {
-  if (!unicode || index + 1 >= S.length) return index + 1;
-  const c = S.charCodeAt(index);
-  if (c < 0xd800 || c > 0xdbff) return index + 1;
-  const d = S.charCodeAt(index + 1);
-  return d < 0xdc00 || d > 0xdfff ? index + 1 : index + 2;
 };
 
 // core-js's replace probes, at load: they decide which templates the engine may expand
@@ -134,6 +112,9 @@ const unsafeSubstitute = replaceSubstitutesUndefinedCapture ? '$' : '$0';
 // \x60 is the backtick, spelt out: the ES5 output check reads a bare one as a template
 const substitutionWithNames = /\$([$&'\x60]|\d{1,2}|<[^>]*>)/g;
 const substitutionNoNames = /\$([$&'\x60]|\d{1,2})/g;
+// Not inlined: called in a loop, and its closures capture per-iteration state.
+// Inlined, the ES5 downlevel wraps each iteration in a _loop function (measured: one
+// new _loop wrapper in regExpReplace on Chrome 41).
 const getSubstitution = (matched: string, str: string, position: number, captures: any[], namedCaptures: any, replacement: string): string => {
   const tailPos = position + matched.length;
   const m = captures.length;
@@ -193,11 +174,35 @@ export const regExpReplace = function (this: any, string: any, replaceValue: any
   }
   const results: any[] = [];
   for (;;) {
-    const result = regExpExecReplace(rx, S);
+    // inlined: regExpExecReplace(rx, S) -- RegExpExec: exec is read on every step
+    const stepExec = rx.exec;
+    let result: any;
+    if (typeof stepExec === 'function') {
+      result = stepExec.call(rx, S);
+      if (result !== null && typeof result !== 'object' && typeof result !== 'function') {
+        throw new TypeError('RegExp exec method returned something other than an Object or null');
+      }
+    } else {
+      if (objectToStringR.call(rx) !== '[object RegExp]') throw new TypeError('RegExp#exec called on incompatible receiver');
+      result = regExpExecAtLoad.call(rx, S);
+    }
     if (result === null) break;
     results[results.length] = result;
     if (!global) break;
-    if (toStrReplace(result[0]) === '') rx.lastIndex = advanceReplace(S, toLengthReplace(rx.lastIndex), fullUnicode);
+    if (toStrReplace(result[0]) === '') {
+      // inlined: advanceReplace(S, index, fullUnicode) -- AdvanceStringIndex: a surrogate
+      // pair is one step under u / v
+      const index = toLengthReplace(rx.lastIndex);
+      let next = index + 1;
+      if (fullUnicode && next < lengthS) {
+        const c = S.charCodeAt(index);
+        if (c >= 0xd800 && c <= 0xdbff) {
+          const d = S.charCodeAt(next);
+          if (d >= 0xdc00 && d <= 0xdfff) next = index + 2;
+        }
+      }
+      rx.lastIndex = next;
+    }
   }
   let accumulated = '';
   let nextSourcePosition = 0;

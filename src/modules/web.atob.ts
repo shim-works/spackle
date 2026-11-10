@@ -34,16 +34,6 @@ export const isSupported = (): boolean => {
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-const invalidCharacterError = (): any => {
-  const message = "Failed to execute 'atob': The string to be decoded is not correctly encoded.";
-  if (typeof DOMException === 'function') {
-    return new DOMException(message, 'InvalidCharacterError');
-  }
-  const error: any = new Error(message);
-  error.name = 'InvalidCharacterError';
-  return error;
-};
-
 export const atobPolyfill = function (data: any): string {
   // WebIDL: a missing required argument is a TypeError, not the string "undefined"
   if (arguments.length === 0) throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
@@ -54,7 +44,15 @@ export const atobPolyfill = function (data: any): string {
   }
   // length % 4 === 1 leaves a dangling 6 bits that can't form a byte
   if (input.length % 4 === 1 || /[^+/0-9A-Za-z]/.test(input)) {
-    throw invalidCharacterError();
+    // inlined: invalidCharacterError()
+    const message = "Failed to execute 'atob': The string to be decoded is not correctly encoded.";
+    if (typeof DOMException === 'function') {
+      throw new DOMException(message, 'InvalidCharacterError');
+    } else {
+      const error: any = new Error(message);
+      error.name = 'InvalidCharacterError';
+      throw error;
+    }
   }
   let output = '';
   let bitStorage = 0;

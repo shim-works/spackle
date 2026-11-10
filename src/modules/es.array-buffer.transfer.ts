@@ -56,6 +56,9 @@ const DETACHED_FLAG = '__spackleDetached';
 
 // Reused descriptor: no allocation per call.
 const DETACHED_DESC: PropertyDescriptor = { value: true, configurable: true };
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const markDetached = (buffer: any): void => {
   try {
     Object.defineProperty(buffer, DETACHED_FLAG, DETACHED_DESC);
@@ -64,6 +67,9 @@ const markDetached = (buffer: any): void => {
   }
 };
 
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const isDetached = (buffer: any): boolean => {
   if (buffer.byteLength !== 0) {
     return false;

@@ -67,26 +67,6 @@ const symbolKeySearch: any = typeof Symbol !== 'undefined' ? (Symbol as any).sea
 // the engine's own @@search, when it has one (Chrome 50+, Safari 10+)
 const nativeRegExpSearch: any = symbolKeySearch ? (RegExp.prototype as any)[symbolKeySearch] : undefined;
 
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws
-const toStrSearch = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
-// RegExpExec: a callable exec wins and must return an object or null
-const regExpExecSearch = (R: any, S: string): any => {
-  const exec = R.exec;
-  if (typeof exec === 'function') {
-    const result = exec.call(R, S);
-    if (result !== null && typeof result !== 'object' && typeof result !== 'function') {
-      throw new TypeError('RegExp exec method returned something other than an Object or null');
-    }
-    return result;
-  }
-  if (objectToStringR.call(R) !== '[object RegExp]') throw new TypeError('RegExp#exec called on incompatible receiver');
-  return regExpExecAtLoad.call(R, S);
-};
-
 // SameValue, for the lastIndex save/restore (-0 is not 0)
 const sameValueSearch = (a: any, b: any): boolean =>
   a === b ? a !== 0 || 1 / a === 1 / b : a !== a && b !== b;
@@ -106,7 +86,21 @@ export const regExpSearch = function (this: any, string: any): any {
   }
   const previousLastIndex = rx.lastIndex;
   if (!sameValueSearch(previousLastIndex, 0)) rx.lastIndex = 0;
-  const result = regExpExecSearch(rx, S);
+  // inlined: regExpExecSearch(rx, S) -- RegExpExec: a callable exec wins and
+  // must return an object or null
+  let result: any;
+  const execFn = rx.exec;
+  if (typeof execFn === 'function') {
+    result = execFn.call(rx, S);
+    if (result !== null && typeof result !== 'object' && typeof result !== 'function') {
+      throw new TypeError('RegExp exec method returned something other than an Object or null');
+    }
+  } else {
+    if (objectToStringR.call(rx) !== '[object RegExp]') {
+      throw new TypeError('RegExp#exec called on incompatible receiver');
+    }
+    result = regExpExecAtLoad.call(rx, S);
+  }
   const currentLastIndex = rx.lastIndex;
   if (!sameValueSearch(currentLastIndex, previousLastIndex)) rx.lastIndex = previousLastIndex;
   return result === null ? -1 : result.index;

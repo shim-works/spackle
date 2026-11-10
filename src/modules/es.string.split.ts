@@ -74,12 +74,6 @@ const symbolKeySplit: any = typeof Symbol !== 'undefined' ? (Symbol as any).spli
 // the engine's own @@split, when it has one (Chrome 50+, Safari 10+)
 const nativeRegExpSplit: any = symbolKeySplit ? (RegExp.prototype as any)[symbolKeySplit] : undefined;
 
-// ToString: String(symbol) returns "Symbol(...)"; the spec throws
-const toStrSplit = (value: any): string => {
-  if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-  return typeof value === 'string' ? value : String(value);
-};
-
 // RegExpExec: a callable exec wins and must return an object or null
 const regExpExecSplit = (R: any, S: string): any => {
   const exec = R.exec;
@@ -98,15 +92,6 @@ const toLengthSplit = (value: any): number => {
   let n = +value; // +x, not Number(x)
   n = n !== n || n <= 0 ? 0 : Math.floor(n);
   return n > 9007199254740991 ? 9007199254740991 : n;
-};
-
-// AdvanceStringIndex: a surrogate pair is one step under u / v
-const advanceSplit = (S: string, index: number, unicode: boolean): number => {
-  if (!unicode || index + 1 >= S.length) return index + 1;
-  const c = S.charCodeAt(index);
-  if (c < 0xd800 || c > 0xdbff) return index + 1;
-  const d = S.charCodeAt(index + 1);
-  return d < 0xdc00 || d > 0xdfff ? index + 1 : index + 2;
 };
 
 // core-js's split probes, at load
@@ -162,7 +147,12 @@ export const regExpSplit = function (this: any, string: any, limit: any): any {
     else if (typeof species === 'function') C = species;
     else throw new TypeError('RegExp @@species is not a constructor');
   }
-  const flags = toStrSplit(rx.flags);
+  // inlined: toStrSplit(rx.flags) -- String(symbol) returns "Symbol(...)"; the spec throws
+  const rawFlags = rx.flags;
+  if (typeof rawFlags === 'symbol') {
+    throw new TypeError('Cannot convert a Symbol value to a string');
+  }
+  const flags = typeof rawFlags === 'string' ? rawFlags : String(rawFlags);
   const unicodeMatching = flags.indexOf('u') !== -1 || flags.indexOf('v') !== -1;
   const splitter = new C(rx, flags.indexOf('y') !== -1 ? flags : flags + 'y');
   const A: string[] = [];
@@ -181,7 +171,18 @@ export const regExpSplit = function (this: any, string: any, limit: any): any {
     const z = regExpExecSplit(splitter, S);
     let e: number;
     if (z === null || (e = Math.min(toLengthSplit(splitter.lastIndex), size)) === p) {
-      q = advanceSplit(S, q, unicodeMatching);
+      // inlined: advanceSplit(S, q, unicodeMatching) -- a surrogate pair is one step under u / v
+      let nextQ = q + 1;
+      if (unicodeMatching && q + 1 < S.length) {
+        const c = S.charCodeAt(q);
+        if (c >= 0xd800 && c <= 0xdbff) {
+          const d = S.charCodeAt(q + 1);
+          if (d >= 0xdc00 && d <= 0xdfff) {
+            nextQ = q + 2;
+          }
+        }
+      }
+      q = nextQ;
       continue;
     }
     A[A.length] = S.slice(p, q);

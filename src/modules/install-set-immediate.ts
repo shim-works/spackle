@@ -64,6 +64,8 @@ const runNext = (): void => {
 };
 
 // Created on first use, so importing this module stays side-effect free.
+// Not inlined: runs once, on first use. Its closure captures a local, and inlined
+// it would make the caller allocate a context on every call.
 const makePost = (): (() => void) => {
   const w: any = window;
   // present, not typeof 'function': Safari 7.1-9's host constructors are typeof 'object'

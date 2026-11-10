@@ -96,6 +96,8 @@ const nativeCodeRe = /\[native code\]/;
 const fnToString = Function.prototype.toString;
 
 // ToPropertyDescriptor: Has/Get each field in spec order, then validate.
+// Not inlined: its caller holds a try/catch, and Chrome 41 (Crankshaft) won't optimise
+// a function containing one, so this has to live outside it.
 const toPropertyDescriptor = (attributes: any): any => {
   if (!isObject(attributes)) throw new TypeError('Property description must be an object');
   const desc: any = {};
@@ -120,6 +122,9 @@ const toPropertyDescriptor = (attributes: any): any => {
 };
 
 // OrdinarySet(O, P, V, Receiver), walking the prototype chain without [[Set]].
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const ordinarySet = (target: any, key: any, value: any, receiver: any): boolean => {
   let ownDesc: any = getOwnDesc(target, key);
   let steps = 0;

@@ -228,12 +228,6 @@ const checkRejections = function (): void {
     w0.setTimeout(checkRejections, 0);
   }
 };
-const onUnhandled = (state: any): void => {
-  pendingRejections.push(state);
-  if (rejectionCheckScheduled) return;
-  rejectionCheckScheduled = true;
-  w0.setTimeout(checkRejections, 0);
-};
 const onHandleUnhandled = (state: any): void => {
   w0.setTimeout(function () {
     dispatchRejectionEvent('rejectionhandled', state.facade, state.value);
@@ -284,6 +278,9 @@ const rejectState = (state: any, reason: any): void => {
 // its callers stay optimisable on old V8.
 const THREW = {};
 let thenError: any;
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const getThen = (value: any): any => {
   try {
     return value.then;
@@ -316,6 +313,9 @@ const resolveState = (state: any, value: any): void => {
 };
 
 // NewPromiseResolveThenableJob: a fresh resolve/reject pair for the thenable.
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const callThen = (then: any, thenable: any, resolveFn: any, rejectFn: any): void => {
   try {
     then.call(thenable, resolveFn, rejectFn);
@@ -323,6 +323,11 @@ const callThen = (then: any, thenable: any, resolveFn: any, rejectFn: any): void
     rejectFn(error);
   }
 };
+
+/*
+ * Not inlined into runNextJob: its two closures capture `done`, which would make
+ * V8 allocate a context on every job, not just thenable ones (measured on Chrome 41).
+ */
 const resolveThenable = (state: any, thenable: any, then: any): void => {
   let done = false;
   // call arguments: no inferred names (see the constructor)
@@ -344,6 +349,9 @@ const resolveThenable = (state: any, thenable: any, then: any): void => {
 
 // A reaction's handler call, with its try kept out of callReaction.
 let handlerThrew = false;
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const callHandler = (handler: any, value: any): any => {
   try {
     return handler(value);
@@ -409,16 +417,6 @@ const callReaction = (reaction: any, state: any): void => {
   }
 };
 
-const runReactions = (state: any, isReject: boolean): void => {
-  const reactions = state.reactions;
-  state.reactions = null;
-  state.notified = false;
-  if (reactions !== null) {
-    if (reactions.length === undefined) callReaction(reactions, state);
-    else for (let i = 0; i < reactions.length; i++) callReaction(reactions[i], state);
-  }
-  if (isReject && !state.rejection) onUnhandled(state);
-};
 
 const runNextJob = function (): void {
   const kind = jobs[jobHead];
@@ -437,15 +435,37 @@ const runNextJob = function (): void {
     jobs.length = rest;
     jobHead = 0;
   }
-  if (kind === NOTIFY) runReactions(a, b);
-  else if (kind === REACTION) callReaction(a, b);
-  else resolveThenable(a, b, c);
+  if (kind === NOTIFY) {
+    // inlined: runReactions(a, b) -- a is the state, b isReject
+    const reactions = a.reactions;
+    a.reactions = null;
+    a.notified = false;
+    if (reactions !== null) {
+      if (reactions.length === undefined) callReaction(reactions, a);
+      else for (let i = 0; i < reactions.length; i++) callReaction(reactions[i], a);
+    }
+    if (b && !a.rejection) {
+      // inlined: onUnhandled(a)
+      pendingRejections[pendingRejections.length] = a;
+      if (!rejectionCheckScheduled) {
+        rejectionCheckScheduled = true;
+        w0.setTimeout(checkRejections, 0);
+      }
+    }
+  } else if (kind === REACTION) {
+    callReaction(a, b);
+  } else {
+    resolveThenable(a, b, c);
+  }
 };
 
 /* -------------------------------------------------------- the Promise */
 
 // The executor call, with its try kept out of the constructor (old V8 won't
 // optimise a function holding one).
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const runExecutor = (executor: any, resolveFn: any, rejectFn: any): void => {
   try {
     executor(resolveFn, rejectFn);
@@ -607,6 +627,9 @@ const staticReject = function (this: any, reason: any): any {
  * Symbol-less engines), close the iterator on our-side failures but never on its
  * own, and reject rather than throw.
  */
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const closeIterator = (iterator: any): void => {
   try {
     const ret = iterator['return'];
@@ -621,6 +644,9 @@ const closeIterator = (iterator: any): void => {
  * all() call, so the walk below holds no closure over loop variables (swc would
  * otherwise wrap each iteration in a function of its own).
  */
+// Not inlined: called in a loop, and its closures capture per-iteration state.
+// Inlined, the ES5 downlevel wraps each iteration in a _loop function (measured:
+// Promise.all +17% time, more garbage on Chrome 41).
 const allElement = (record: any, index: number): any => {
   let alreadyCalled = false;
   return function (x: any): void {

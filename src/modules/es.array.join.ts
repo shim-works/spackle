@@ -49,7 +49,8 @@ const toStr = (value: any): string => {
 const joining: any[] = [];
 let depth = 0;
 
-// The loop on its own, free of the try/catch below, so the engine can optimise it.
+// Not inlined: its caller holds a try/catch, and Chrome 41 (Crankshaft) won't optimise
+// a function containing one, so this loop has to live outside it.
 const joinLoop = function (O: any, len: number, sep: string): string {
   let result = '';
   for (let k = 0; k < len; k++) {

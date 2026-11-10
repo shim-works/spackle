@@ -117,8 +117,9 @@ export const capture = (): void => {
 // in mapfn cannot clear the outer run's flag.
 let mapping = false;
 
-// The protocol loop, with no try: Crankshaft (Chrome <= 58) won't optimise a
-// function holding one. arrayFrom catches and closes.
+// The protocol loop. arrayFrom catches and closes.
+// Not inlined: its caller holds a try/catch, and Chrome 41 (Crankshaft) won't optimise
+// a function containing one, so this loop has to live outside it.
 const fillFromIterator = (A: any, iterator: any, next: any, mapfn: any, thisArg: any, plain: boolean): any => {
   let k = 0;
   while (true) {

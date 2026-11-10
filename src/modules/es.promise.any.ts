@@ -11,10 +11,6 @@ export const isSupported = (): boolean => {
 const isObject = (value: any): boolean =>
   value !== null && (typeof value === 'object' || typeof value === 'function');
 const hasOwn = Object.prototype.hasOwnProperty;
-// IsConstructor, best ES5 approximation: ordinary and built-in constructors carry
-// an own prototype; bound functions are constructors without one.
-const isConstructor = (C: any): boolean =>
-  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
 
 /*
  * Built-in closures (resolve element functions, capability wrappers) are not
@@ -30,23 +26,11 @@ try {
 const builtinClosure = (fn: (x: any) => any): any =>
   arrowWrap ? arrowWrap(fn) : function (x: any) { return fn(x); };
 
-// NewPromiseCapability(C), with GetCapabilitiesExecutor's checks.
-const newPromiseCapability = (C: any): any => {
-  if (!isConstructor(C)) throw new TypeError('Promise capability: not a constructor');
-  const capability: any = { promise: undefined, resolve: undefined, reject: undefined };
-  const executor = function (resolve: any, reject: any): void {
-    if (capability.resolve !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
-    if (capability.reject !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
-    capability.resolve = resolve;
-    capability.reject = reject;
-  };
-  capability.promise = new C(executor);
-  if (typeof capability.resolve !== 'function') throw new TypeError('Promise resolve function is not callable');
-  if (typeof capability.reject !== 'function') throw new TypeError('Promise reject function is not callable');
-  return capability;
-};
 
 // IteratorClose after an abrupt step on our side; the original error wins.
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const closeIterator = (iterator: any): void => {
   try {
     const ret = iterator['return'];
@@ -58,25 +42,12 @@ const closeIterator = (iterator: any): void => {
 
 // One description per combinator call: an iterator and its next, or (engines
 // without Symbol, where nothing else is iterable) an array-like walked by index.
-const getIteratorRecord = (iterable: any): any => {
-  const key = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
-  if (key) {
-    if (iterable === null || iterable === undefined) throw new TypeError('object is not iterable');
-    const method = iterable[key];
-    if (typeof method !== 'function') throw new TypeError('object is not iterable');
-    const iterator = method.call(iterable);
-    if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
-    return { iterator: iterator, next: iterator.next, arrayLike: null, index: 0, done: false };
-  }
-  if (iterable === null || iterable === undefined || typeof iterable.length !== 'number') {
-    throw new TypeError('object is not iterable');
-  }
-  return { iterator: null, next: null, arrayLike: iterable, index: 0, done: false };
-};
-
 // IteratorStepValue: returns DONE at the end; protocol errors mark the record
 // done (so it is not closed) and propagate.
 const DONE = {};
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one, so inlining this deopts its caller. Measured with every try helper
+// inlined: +15% garbage in the speed test on Chrome 41.
 const stepValue = (record: any): any => {
   if (record.arrayLike !== null) {
     if (record.index >= record.arrayLike.length) {
@@ -119,6 +90,9 @@ const arrayFromList = (list: any, length: number): any[] => {
 
 // The reject element function for one input: a factory over one per-call state
 // record, so the walk below closes over nothing (see es.promise.all-settled).
+// Not inlined: called in a loop, and its closures capture per-iteration state.
+// Inlined, the ES5 downlevel wraps each iteration in a _loop function (measured:
+// Promise.all +17% time, more garbage on Chrome 41).
 const subscribeElement = (state: any, index: number, nextPromise: any): void => {
   let alreadyCalled = false;
   const onRejected = builtinClosure(function (x: any) {
@@ -145,12 +119,40 @@ const makeAggregateError = (errors: any[]): any => {
 
 export const promiseAny = function any(this: any, iterable: any) {
   const C = this;
-  const capability = newPromiseCapability(C);
+  // inlined: newPromiseCapability(C), with GetCapabilitiesExecutor's checks
+  // inlined: isConstructor(C)
+  if (!(typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || '')))) {
+    throw new TypeError('Promise capability: not a constructor');
+  }
+  const capability: any = { promise: undefined, resolve: undefined, reject: undefined };
+  const executor = function (resolve: any, reject: any): void {
+    if (capability.resolve !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
+    if (capability.reject !== undefined) throw new TypeError('Promise executor has already been invoked with non-undefined arguments');
+    capability.resolve = resolve;
+    capability.reject = reject;
+  };
+  capability.promise = new C(executor);
+  if (typeof capability.resolve !== 'function') throw new TypeError('Promise resolve function is not callable');
+  if (typeof capability.reject !== 'function') throw new TypeError('Promise reject function is not callable');
   let record: any = null;
   try {
     const promiseResolve = C.resolve;
     if (typeof promiseResolve !== 'function') throw new TypeError('Promise resolve is not callable');
-    record = getIteratorRecord(iterable);
+    // inlined: getIteratorRecord(iterable)
+    const iteratorKey = typeof Symbol !== 'undefined' ? (Symbol as any).iterator : undefined;
+    if (iteratorKey) {
+      if (iterable === null || iterable === undefined) throw new TypeError('object is not iterable');
+      const method = iterable[iteratorKey];
+      if (typeof method !== 'function') throw new TypeError('object is not iterable');
+      const iterator = method.call(iterable);
+      if (!isObject(iterator)) throw new TypeError('Result of the Symbol.iterator method is not an object');
+      record = { iterator: iterator, next: iterator.next, arrayLike: null, index: 0, done: false };
+    } else {
+      if (iterable === null || iterable === undefined || typeof iterable.length !== 'number') {
+        throw new TypeError('object is not iterable');
+      }
+      record = { iterator: null, next: null, arrayLike: iterable, index: 0, done: false };
+    }
     const state = { errors: Object.create(null), count: 0, remaining: 1, capability: capability };
     for (;;) {
       const value = stepValue(record);

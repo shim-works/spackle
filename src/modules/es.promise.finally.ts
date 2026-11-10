@@ -16,10 +16,6 @@ export const isSupported = (): boolean => {
 const isObject = (value: any): boolean =>
   value !== null && (typeof value === 'object' || typeof value === 'function');
 const hasOwn = Object.prototype.hasOwnProperty;
-// IsConstructor, best ES5 approximation: ordinary and built-in constructors carry
-// an own prototype; bound functions are constructors without one.
-const isConstructor = (C: any): boolean =>
-  typeof C === 'function' && (hasOwn.call(C, 'prototype') || /^bound /.test(C.name || ''));
 
 /*
  * Built-in closures (resolve element functions, capability wrappers) are not
@@ -61,7 +57,9 @@ export const promiseFinally = function (this: any, onFinally: any): any {
     const speciesKey = typeof Symbol !== 'undefined' ? (Symbol as any).species : undefined;
     const species = speciesKey ? C[speciesKey] : undefined;
     if (species === undefined || species === null) C = Default;
-    else if (isConstructor(species)) C = species;
+    // inlined: isConstructor(species) -- ordinary and built-in constructors carry an
+    // own prototype; bound functions are constructors without one
+    else if (typeof species === 'function' && (hasOwn.call(species, 'prototype') || /^bound /.test(species.name || ''))) C = species;
     else throw new TypeError('Promise @@species is not a constructor');
   }
   // Not callable: the argument passes straight through as both reactions
