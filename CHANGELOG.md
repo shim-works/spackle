@@ -2,7 +2,7 @@
 
 All notable changes to `@shim-works/spackle`. Spackle is in alpha: anything may change between releases.
 
-## [Unreleased]
+## [0.1.0-alpha.11] - 2026-11-10
 
 ### Fixed
 - The package entry points (`dist/index.js`, `dist/index.mjs`) are now ES5, like the script build. Before, a bundler that skips `node_modules` shipped `const` and arrow functions to old engines.
