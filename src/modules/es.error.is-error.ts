@@ -60,6 +60,29 @@ const isDOMException = (value: any): boolean => {
   }
 };
 
+// A @@toStringTag is in the way: shadow it, read the real class, put it back.
+// Not inlined: holds a try/catch, and Chrome 41 (Crankshaft) won't optimise a function
+// containing one. catch, not finally (not in the baseline): restored on both exits by hand.
+const isErrorBehindTag = (value: any): boolean => {
+  const own = getOwnDesc(value, tagKey);
+  try {
+    defineProp(value, tagKey, shadow);
+  } catch (e) {
+    return false;
+  }
+  let result: boolean;
+  try {
+    result = objectToString.call(value) === '[object Error]';
+  } catch (error) {
+    if (own) defineProp(value, tagKey, own);
+    else delete value[tagKey];
+    throw error;
+  }
+  if (own) defineProp(value, tagKey, own);
+  else delete value[tagKey];
+  return result;
+};
+
 export const errorIsError = function isError(value: any): boolean {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return false;
   if (isDOMException(value)) return true;
@@ -73,16 +96,5 @@ export const errorIsError = function isError(value: any): boolean {
     }
   }
   if (!tagged) return objectToString.call(value) === '[object Error]';
-  const own = getOwnDesc(value, tagKey);
-  try {
-    defineProp(value, tagKey, shadow);
-  } catch (e) {
-    return false;
-  }
-  try {
-    return objectToString.call(value) === '[object Error]';
-  } finally {
-    if (own) defineProp(value, tagKey, own);
-    else delete value[tagKey];
-  }
+  return isErrorBehindTag(value);
 };

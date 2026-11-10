@@ -20,9 +20,11 @@ export const isMathHypotSupported = isSupported;
 const scratch: number[] = [];
 let depth = 0;
 
-// Declared (value1, value2) for the spec length of 2; every argument comes from arguments.
-export const mathHypot = function hypot(_value1?: any, _value2?: any): number {
-  const count = arguments.length;
+// Four or more arguments. Not inlined: holds a try/catch, and Chrome 41 (Crankshaft)
+// won't optimise a function containing one. catch, not finally (not in the baseline):
+// the latch must drop on a throwing valueOf too.
+const hypotMany = (args: any): number => {
+  const count = args.length;
   const values = depth === 0 ? scratch : new Array(count);
   depth++;
   let max = 0;
@@ -31,7 +33,7 @@ export const mathHypot = function hypot(_value1?: any, _value2?: any): number {
   try {
     // ToNumber every argument exactly once, in order, before any arithmetic
     for (let i = 0; i < count; i++) {
-      const numeric = +arguments[i];
+      const numeric = +args[i];
       values[i] = numeric;
       if (numeric === Infinity || numeric === -Infinity) {
         hasInfinity = true;
@@ -44,9 +46,11 @@ export const mathHypot = function hypot(_value1?: any, _value2?: any): number {
         }
       }
     }
-  } finally {
+  } catch (error) {
     depth--;
+    throw error;
   }
+  depth--;
   // spec quirk: any Infinity wins, even if a NaN is also in the mix
   if (hasInfinity) {
     return Infinity;
@@ -66,3 +70,34 @@ export const mathHypot = function hypot(_value1?: any, _value2?: any): number {
   return max * Math.sqrt(sumOfSquares);
 };
 
+// Declared (value1, value2) for the spec length of 2; every argument comes from arguments.
+export const mathHypot = function hypot(_value1?: any, _value2?: any): number {
+  const count = arguments.length;
+  if (count > 3) return hypotMany(arguments);
+  // Up to three arguments, the common case: coerced into locals, each exactly once
+  // and in order. No scratch array, no latch and no try, so this stays optimisable.
+  // A missing argument counts as +0, which changes neither the maximum nor the sum.
+  const a = count > 0 ? +arguments[0] : 0;
+  const b = count > 1 ? +arguments[1] : 0;
+  const c = count > 2 ? +arguments[2] : 0;
+  // spec quirk: any Infinity wins, even if a NaN is also in the mix
+  if (a === Infinity || a === -Infinity || b === Infinity || b === -Infinity || c === Infinity || c === -Infinity) {
+    return Infinity;
+  }
+  if (a !== a || b !== b || c !== c) {
+    return NaN;
+  }
+  const x = a < 0 ? -a : a;
+  const y = b < 0 ? -b : b;
+  const z = c < 0 ? -c : c;
+  let max = x > y ? x : y;
+  if (z > max) max = z;
+  if (max === 0) {
+    return 0;
+  }
+  // scale by the largest value so huge inputs don't overflow
+  const sx = x / max;
+  const sy = y / max;
+  const sz = z / max;
+  return max * Math.sqrt(sx * sx + sy * sy + sz * sz);
+};

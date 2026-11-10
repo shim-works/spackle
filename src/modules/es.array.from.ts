@@ -145,6 +145,9 @@ const fillFromIterator = (A: any, iterator: any, next: any, mapfn: any, thisArg:
   }
 };
 
+// Hoisted: an ES5 engine builds a new RegExp object each time a literal is evaluated.
+const RE_SURROGATE = /[\uD800-\uDFFF]/;
+
 // Declared (items) for the spec length of 1; mapfn and thisArg come from arguments.
 export const arrayFrom = function from(this: any, items: any): any {
   const C: any = this;
@@ -232,7 +235,7 @@ export const arrayFrom = function from(this: any, items: any): any {
   }
 
   // array-like path
-  if (typeof items === 'string' && !warnedAstralSplit && /[\uD800-\uDFFF]/.test(items)) {
+  if (typeof items === 'string' && !warnedAstralSplit && RE_SURROGATE.test(items)) {
     warnedAstralSplit = true;
     console.warn(
       '[spackle] Array.from: no Symbol.iterator on this engine, so strings split by UTF-16 unit — astral characters break into surrogate halves'

@@ -340,11 +340,14 @@ const sortedList = (O: any, len: number, comparefn: any): any => {
   if (comparefn === undefined) return sortList(items, len, defaultSortCompare);
   const saved = activeCompareFn;
   activeCompareFn = comparefn;
+  // catch, not finally (not in the baseline): restored on both exits by hand
   try {
     items = sortList(items, len, userCompare);
-  } finally {
+  } catch (error) {
     activeCompareFn = saved;
+    throw error;
   }
+  activeCompareFn = saved;
   return items;
 };
 

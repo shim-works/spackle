@@ -71,6 +71,9 @@ const nativeToString = Object.prototype.toString;
 const isRegExpObject = (x: any): boolean =>
   x !== null && typeof x === 'object' && nativeToString.call(x) === '[object RegExp]';
 
+// Hoisted: an ES5 engine builds a new RegExp object each time a literal is evaluated.
+const RE_NEEDS_ESCAPE = /[/\n\r\u2028\u2029]/;
+
 // Declared (pattern, flags): length 2. `this instanceof` stands in for NewTarget.
 export const RegExpPolyfill = function (this: any, pattern?: any, flags?: any): any {
   // inlined: isRegExp(pattern) -- IsRegExp: @@match decides when present, else the internal slot
@@ -111,7 +114,7 @@ export const RegExpPolyfill = function (this: any, pattern?: any, flags?: any): 
    * redefined there, so the pattern is escaped before construction instead.
    * `\/` and the escaped line terminators match exactly what the bare characters did.
    */
-  if (/[/\n\r\u2028\u2029]/.test(source)) {
+  if (RE_NEEDS_ESCAPE.test(source)) {
     let escaped = '';
     let inClass = false;
     for (let i = 0; i < source.length; i++) {

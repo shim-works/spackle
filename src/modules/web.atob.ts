@@ -34,16 +34,22 @@ export const isSupported = (): boolean => {
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
+// Hoisted: an ES5 engine builds a new RegExp object each time a literal is evaluated.
+// String#replace resets a global regex's lastIndex, so sharing RE_WHITESPACE is safe.
+const RE_WHITESPACE = /[\t\n\f\r ]/g;
+const RE_PADDING = /==?$/;
+const RE_NOT_BASE64 = /[^+/0-9A-Za-z]/;
+
 export const atobPolyfill = function (data: any): string {
   // WebIDL: a missing required argument is a TypeError, not the string "undefined"
   if (arguments.length === 0) throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
   // ASCII whitespace per the spec: tab, LF, FF, CR, space
-  let input = String(data).replace(/[\t\n\f\r ]/g, '');
+  let input = String(data).replace(RE_WHITESPACE, '');
   if (input.length % 4 === 0) {
-    input = input.replace(/==?$/, '');
+    input = input.replace(RE_PADDING, '');
   }
   // length % 4 === 1 leaves a dangling 6 bits that can't form a byte
-  if (input.length % 4 === 1 || /[^+/0-9A-Za-z]/.test(input)) {
+  if (input.length % 4 === 1 || RE_NOT_BASE64.test(input)) {
     // inlined: invalidCharacterError()
     const message = "Failed to execute 'atob': The string to be decoded is not correctly encoded.";
     if (typeof DOMException === 'function') {

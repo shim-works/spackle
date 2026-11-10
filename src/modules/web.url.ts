@@ -123,7 +123,23 @@ const percentEncode = (s: string, set: number): string => {
   return out;
 };
 
-const isHex = (c: string): boolean => /^[0-9A-Fa-f]$/.test(c);
+// Char codes, not a regex literal: an ES5 engine builds a new RegExp object each
+// time a literal is evaluated, and these run once per input character. `c` comes
+// from charAt, so it is one character or '' (charCodeAt gives NaN, every test fails).
+const isHex = (c: string): boolean => {
+  const n = c.charCodeAt(0);
+  return (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102);
+};
+// Whole-string tests, hoisted for the same reason: one RegExp object for the page,
+// not one per call. None is global, so there is no lastIndex to carry over.
+const RE_SURROGATE = /[\ud800-\udfff]/;
+const RE_ALL_DIGITS = /^[0-9]+$/;
+const RE_ALL_HEX = /^[0-9A-Fa-f]+$/;
+const RE_ALL_OCTAL = /^[0-7]+$/;
+const RE_NON_ASCII = /[^\u0000-\u007f]/;
+const RE_NON_BASIC = /[^\0-~]/;
+const RE_FORBIDDEN_HOST = /[\u0000\t\n\r #/:<>?@[\\\]^|]/;
+const RE_FORBIDDEN_DOMAIN = /[\u0000-\u0020#%/:<>?@[\\\]^|\u007f]/;
 
 // percent-decode, then UTF-8 decode without BOM, invalid bytes to U+FFFD
 // Not inlined: merged into parseHost the function got too big for Chrome 41 to
@@ -190,7 +206,7 @@ const percentDecodeUtf8 = (s: string): string => {
 const toUSV = (value: any): string => {
   if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
   const s = String(value);
-  return /[\ud800-\udfff]/.test(s)
+  return RE_SURROGATE.test(s)
     ? s.replace(/[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g, function (m: string) { return m.length === 2 ? m : '\ufffd'; })
     : s;
 };
@@ -208,7 +224,7 @@ const parseIPv4Number = (input: string): number => {
     radix = 8;
   }
   if (input === '') return 0;
-  const valid = radix === 10 ? /^[0-9]+$/ : radix === 16 ? /^[0-9A-Fa-f]+$/ : /^[0-7]+$/;
+  const valid = radix === 10 ? RE_ALL_DIGITS : radix === 16 ? RE_ALL_HEX : RE_ALL_OCTAL;
   if (!valid.test(input)) return FAILURE;
   return parseInt(input, radix);
 };
@@ -222,7 +238,7 @@ const endsInANumber = (input: string): boolean => {
     parts.pop();
   }
   const last = parts[parts.length - 1];
-  if (last !== '' && /^[0-9]+$/.test(last)) return true;
+  if (last !== '' && RE_ALL_DIGITS.test(last)) return true;
   return parseIPv4Number(last) !== FAILURE;
 };
 
@@ -290,8 +306,10 @@ const parseIPv6 = (input: string): any => {
           if (input.charAt(pointer) === '.' && numbersSeen < 4) pointer++;
           else return FAILURE;
         }
-        if (!/^[0-9]$/.test(input.charAt(pointer))) return FAILURE;
-        while (/^[0-9]$/.test(input.charAt(pointer))) {
+        // char codes, not a regex literal per character (NaN past the end fails both)
+        let digit = input.charCodeAt(pointer);
+        if (!(digit >= 48 && digit <= 57)) return FAILURE;
+        while ((digit = input.charCodeAt(pointer)) >= 48 && digit <= 57) {
           const number = +input.charAt(pointer);
           if (ipv4Piece === -1) ipv4Piece = number;
           else if (ipv4Piece === 0) return FAILURE;
@@ -371,7 +389,7 @@ const MAPPED_ONTO_FORBIDDEN = '¨¯´¸˘˙˚˛˜˝ͺ΄΅᾽᾿῀' +
 // optimise (measured: new URL +11% time).
 const domainToASCII = (domain: string): any => {
   // an ASCII domain needs no mapping and no punycode: the common case, no allocation past the lowercase
-  if (!/[^\u0000-\u007f]/.test(domain)) return domain === '' ? FAILURE : domain.toLowerCase();
+  if (!RE_NON_ASCII.test(domain)) return domain === '' ? FAILURE : domain.toLowerCase();
   let mapped = '';
   for (let i = 0; i < domain.length; i++) {
     // inlined: code point at i -- a surrogate pair is one code point
@@ -419,7 +437,7 @@ const domainToASCII = (domain: string): any => {
   for (let l = 0; l < labels.length; l++) {
     const label = labels[l];
     if (l > 0) out += '.';
-    if (!/[^\0-~]/.test(label)) {
+    if (!RE_NON_BASIC.test(label)) {
       out += label;
       continue;
     }
@@ -502,19 +520,23 @@ const parseHost = (input: string, isOpaque: boolean): any => {
     return parseIPv6(input.substring(1, input.length - 1));
   }
   if (isOpaque) {
-    if (/[\u0000\t\n\r #/:<>?@[\\\]^|]/.test(input)) return FAILURE;
+    if (RE_FORBIDDEN_HOST.test(input)) return FAILURE;
     return percentEncode(input, SET_C0);
   }
   const asciiDomain = domainToASCII(percentDecodeUtf8(input));
   if (asciiDomain === FAILURE) return FAILURE;
-  if (/[\u0000-\u0020#%/:<>?@[\\\]^|\u007f]/.test(asciiDomain)) return FAILURE;
+  if (RE_FORBIDDEN_DOMAIN.test(asciiDomain)) return FAILURE;
   if (endsInANumber(asciiDomain)) return parseIPv4(asciiDomain);
   return asciiDomain;
 };
 
 /* ------------------------------------------------------------ the parser */
 
-const isAlpha = (c: string): boolean => /^[A-Za-z]$/.test(c);
+// char codes, as isHex above
+const isAlpha = (c: string): boolean => {
+  const n = c.charCodeAt(0);
+  return (n >= 65 && n <= 90) || (n >= 97 && n <= 122);
+};
 const isWindowsDriveLetter = (s: string): boolean =>
   s.length === 2 && isAlpha(s.charAt(0)) && (s.charAt(1) === ':' || s.charAt(1) === '|');
 const isNormalizedWindowsDriveLetter = (s: string): boolean =>
@@ -567,7 +589,9 @@ function basicParse(input: string, base: any, url: any, stateOverride: number): 
         break;
 
       case SCHEME:
-        if (c !== '' && /^[A-Za-z0-9+\-.]$/.test(c)) {
+        // inlined char-code test for [A-Za-z0-9+\-.] -- no regex literal per character
+        const sc = c.charCodeAt(0);
+        if ((sc >= 97 && sc <= 122) || (sc >= 65 && sc <= 90) || (sc >= 48 && sc <= 57) || sc === 43 || sc === 45 || sc === 46) {
           buffer += c.toLowerCase();
         } else if (c === ':') {
           if (stateOverride) {
@@ -752,7 +776,9 @@ function basicParse(input: string, base: any, url: any, stateOverride: number): 
         break;
 
       case PORT:
-        if (c !== '' && /^[0-9]$/.test(c)) {
+        // char-code test for [0-9] -- no regex literal per character
+        const pc = c.charCodeAt(0);
+        if (pc >= 48 && pc <= 57) {
           buffer += c;
         } else if (c === '' || c === '/' || c === '?' || c === '#' || (special && c === '\\') || stateOverride) {
           if (buffer !== '') {

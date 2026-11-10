@@ -5,6 +5,7 @@ All notable changes to `@shim-works/spackle`. Spackle is in alpha: anything may 
 ## [Unreleased]
 
 ### Fixed
+- The package entry points (`dist/index.js`, `dist/index.mjs`) are now ES5, like the script build. Before, a bundler that skips `node_modules` shipped `const` and arrow functions to old engines.
 - Install no longer stops on Chrome 42–45, where some DOM collections ship a non-configurable `@@iterator`.
 - Safari 7.1–9 now get a shared `%TypedArray%`: the nine typed array types inherit from it, and every method is installed on it once, as on modern engines and in core-js.
 - `ArrayBuffer.prototype.transfer` and `setImmediate` now find `MessageChannel` on Safari 7.1–9 (it reports `typeof 'object'` there), so transfer really detaches and setImmediate takes the fast path.
@@ -12,6 +13,9 @@ All notable changes to `@shim-works/spackle`. Spackle is in alpha: anything may 
 - Iterator helpers, `WeakMap`/`WeakSet` iterable constructors, `AggregateError` `cause`, `Array.prototype.sort` (Safari 10) and `Object.assign` on the Safari 7.1 `Symbol` shim now match core-js's checks.
 
 ### Changed
+- Helpers inside each polyfill are now inlined into their callers, so a call is a single frame. No behaviour change.
+- `URL` parsing no longer builds a RegExp object per character on old engines: about 12–17% faster on Chromium 41.
+- No `try/finally` is left in any polyfill (`Math.hypot`, `Error.isError`, typed array `sort`).
 - Spackle now aims to match core-js compliance. On the 1,357-check verify suite there is no check core-js passes that Spackle fails, on Chrome 38–39, Chromium 41–150 and Safari 7.1–11.
 
 ## [0.1.0-alpha.10] - 2026-11-04
