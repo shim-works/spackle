@@ -58,6 +58,7 @@
     "build:browser-tests": "node scripts/build-browser-tests.mjs",
     "verify:es5": "node scripts/verify-es5.mjs dist/index.global.js dist/index.js dist/index.mjs",
     "release:alpha": "git diff --quiet HEAD && npm whoami && npm run lint && npm test && npm run build && npm version prerelease --preid alpha && git push --follow-tags && npm publish --tag alpha",
+    "release:beta": "git diff --quiet HEAD && npm whoami && npm run lint && npm test && npm run build && npm version prerelease --preid beta && git push --follow-tags && npm publish --tag beta",
     "release": "git diff --quiet HEAD && npm whoami && npm run lint && npm test && npm run build && npm version patch && git push --follow-tags && npm publish"
   },
   "devDependencies": {

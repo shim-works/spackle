@@ -1,6 +1,10 @@
 # Changelog
 
-All notable changes to `@shim-works/spackle`. Spackle is in alpha: anything may change between releases.
+All notable changes to `@shim-works/spackle`. Spackle is in beta: the API is stable, and bug reports are welcome.
+
+## [0.1.0-beta.0] - 2026-11-18
+
+First beta. No runtime changes from 0.1.0-alpha.11.
 
 ## [0.1.0-alpha.11] - 2026-11-10
 
